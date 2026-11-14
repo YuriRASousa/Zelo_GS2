@@ -27,7 +27,8 @@ import java.util.List;
  * <ul>
  *   <li>mapa, detalhe, catalogo, painel publico e fotos: abertos, porque a
  *       transparencia faz parte da proposta;</li>
- *   <li>registrar, apoiar, avaliar e perfil: cidadao logado;</li>
+ *   <li>registrar, apoiar, avaliar, comentar, cancelar, perfil e
+ *       notificacoes: usuario logado;</li>
  *   <li>/api/gestor/**: somente papel GESTOR.</li>
  * </ul>
  */
@@ -57,6 +58,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/gestor/**").hasRole("GESTOR")
+                        .requestMatchers("/api/notificacoes/**", "/api/usuarios/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/ocorrencias/minhas", "/api/ocorrencias/apoiadas").authenticated()
                         .requestMatchers(HttpMethod.GET,
                                 "/api/ocorrencias", "/api/ocorrencias/*", "/api/ocorrencias/duplicada",

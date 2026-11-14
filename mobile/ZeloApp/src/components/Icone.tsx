@@ -35,7 +35,7 @@ interface Props {
   espessura?: number;
 }
 
-export default function IconeCategoria({ nome, tamanho = 20, cor = '#0B5D4B', espessura = 2 }: Props) {
+export default function IconeCategoria({ nome, tamanho = 20, cor = '#1A4E9E', espessura = 2 }: Props) {
   const Componente = ICONES[nome] ?? CircleAlert;
   return <Componente size={tamanho} color={cor} strokeWidth={espessura} />;
 }

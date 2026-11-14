@@ -3,6 +3,7 @@
 -- Rotinas automaticas de acompanhamento e transparencia:
 --   * recalcular_prioridades: reordena a fila (o tempo de espera conta)
 --   * detectar_atrasos: marca na linha do tempo quem estourou o prazo
+--     e notifica o autor
 --   * gerar_indicadores: consolida o mes por bairro para o painel publico
 --   * executar_rotina_diaria: as tres em sequencia, para o agendador
 --
@@ -71,7 +72,10 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_indicador AS
         CLOSE c_abertas;
 
         pkg_zl_log.registrar('RECALCULAR_PRIORIDADES',
-            o_qt_atualizadas || ' ocorrencia(s) mudaram de prioridade.', o_qt_atualizadas);
+            CASE o_qt_atualizadas WHEN 0 THEN 'Nenhuma ocorrência mudou de prioridade.'
+                                  WHEN 1 THEN '1 ocorrência mudou de prioridade.'
+                                  ELSE o_qt_atualizadas || ' ocorrências mudaram de prioridade.' END,
+            o_qt_atualizadas);
     EXCEPTION
         WHEN OTHERS THEN
             IF c_abertas%ISOPEN THEN CLOSE c_abertas; END IF;
@@ -80,26 +84,45 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_indicador AS
     END recalcular_prioridades;
 
     -- -----------------------------------------------------------------
+    -- Cada ocorrencia ganha no maximo uma linha de atraso (tp_evento =
+    -- ATRASO) e o autor recebe uma notificacao. Os ids sao coletados de
+    -- uma vez e a linha do tempo e gravada com FORALL.
+    -- -----------------------------------------------------------------
     PROCEDURE detectar_atrasos(o_qt_novos_atrasos OUT NUMBER) IS
+        TYPE t_ids IS TABLE OF zl_ocorrencia.id_ocorrencia%TYPE;
+        v_ids t_ids;
     BEGIN
-        INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
-                                  ds_comentario, id_usuario)
-        SELECT seq_zl_historico.NEXTVAL, o.id_ocorrencia, o.st_ocorrencia, o.st_ocorrencia,
-               c_marca_atraso || ' Prazo de atendimento vencido em '
-               || TO_CHAR(o.dt_prazo, 'DD/MM/YYYY')
-               || '. Prioridade elevada automaticamente.',
-               NULL
+        SELECT o.id_ocorrencia
+          BULK COLLECT INTO v_ids
           FROM zl_ocorrencia o
          WHERE o.st_ocorrencia IN ('ABERTA', 'EM_ANALISE', 'EM_ANDAMENTO')
            AND o.dt_prazo < SYSDATE
            AND NOT EXISTS (SELECT 1 FROM zl_historico h
                             WHERE h.id_ocorrencia = o.id_ocorrencia
-                              AND h.ds_comentario LIKE c_marca_atraso || '%');
+                              AND h.tp_evento = 'ATRASO')
+         ORDER BY o.id_ocorrencia;
 
-        o_qt_novos_atrasos := SQL%ROWCOUNT;
+        FORALL i IN 1 .. v_ids.COUNT
+            INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
+                                      ds_comentario, id_usuario, tp_evento)
+            SELECT seq_zl_historico.NEXTVAL, o.id_ocorrencia, o.st_ocorrencia, o.st_ocorrencia,
+                   c_marca_atraso || ' Prazo de atendimento vencido em '
+                   || TO_CHAR(o.dt_prazo, 'fmDD "de" month', 'NLS_DATE_LANGUAGE=PORTUGUESE')
+                   || '. Prioridade elevada automaticamente.',
+                   NULL, 'ATRASO'
+              FROM zl_ocorrencia o
+             WHERE o.id_ocorrencia = v_ids(i);
+
+        FOR i IN 1 .. v_ids.COUNT LOOP
+            pkg_zl_notificacao.atraso(v_ids(i));
+        END LOOP;
+
+        o_qt_novos_atrasos := v_ids.COUNT;
 
         pkg_zl_log.registrar('DETECTAR_ATRASOS',
-            o_qt_novos_atrasos || ' nova(s) ocorrencia(s) com prazo vencido.',
+            CASE o_qt_novos_atrasos WHEN 0 THEN 'Nenhum prazo novo vencido.'
+                                    WHEN 1 THEN '1 ocorrência passou do prazo e o autor foi avisado.'
+                                    ELSE o_qt_novos_atrasos || ' ocorrências passaram do prazo e os autores foram avisados.' END,
             o_qt_novos_atrasos,
             CASE WHEN o_qt_novos_atrasos > 0 THEN 'AVISO' ELSE 'INFO' END);
     END detectar_atrasos;
@@ -174,7 +197,8 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_indicador AS
         o_qt_bairros := SQL%ROWCOUNT;
 
         pkg_zl_log.registrar('GERAR_INDICADORES',
-            'Indicadores de ' || p_mes || ' gerados para ' || o_qt_bairros || ' bairro(s).',
+            'Indicadores de ' || TO_CHAR(TO_DATE(p_mes, 'YYYY-MM'), 'fmmonth "de" YYYY', 'NLS_DATE_LANGUAGE=PORTUGUESE') || ' consolidados para ' || o_qt_bairros
+            || CASE WHEN o_qt_bairros = 1 THEN ' bairro.' ELSE ' bairros.' END,
             o_qt_bairros);
     END gerar_indicadores;
 

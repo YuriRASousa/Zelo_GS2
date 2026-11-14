@@ -89,6 +89,7 @@ public class PainelRepository {
                        SUM(qt_em_aberto) AS em_aberto, SUM(qt_resolvidas) AS resolvidas
                   FROM vw_zl_ranking_categoria""" + filtro + """
                  GROUP BY nm_categoria, ds_icone
+                HAVING SUM(qt_total) > 0
                  ORDER BY total DESC, nm_categoria
                 """, (rs, i) -> new CategoriaRanking(rs.getString(1), rs.getString(2), rs.getInt(3),
                 rs.getInt(4), rs.getInt(5)), args);
@@ -98,7 +99,7 @@ public class PainelRepository {
     public List<CidadaoRanking> cidadaos(Long bairroId) {
         String filtro = bairroId != null ? " AND id_bairro = ?" : "";
         Object[] args = bairroId != null ? new Object[]{bairroId} : new Object[]{};
-        return jdbc.query("SELECT nm_usuario, nr_pontos FROM zl_usuario WHERE tp_papel = 'CIDADAO'" + filtro
+        return jdbc.query("SELECT nm_usuario, nr_pontos FROM zl_usuario WHERE tp_papel = 'CIDADAO' AND nr_pontos > 0" + filtro
                         + " ORDER BY nr_pontos DESC, nm_usuario FETCH FIRST 5 ROWS ONLY",
                 (rs, i) -> new CidadaoRanking(OcorrenciaRepository.primeiroNome(rs.getString(1)), rs.getInt(2)), args);
     }

@@ -26,11 +26,22 @@ public final class AuthDtos {
     public record PreferenciasRequest(boolean fonteGrande) {
     }
 
-    /** Perfil com os numeros de participacao do cidadao. */
+    /** Edicao do perfil. Bairro e obrigatorio para cidadao (o gestor pode ficar sem). */
+    public record PerfilRequest(
+            @NotBlank(message = "Informe o seu nome.") @Size(min = 3, max = 100, message = "Nome com 3 a 100 letras.") String nome,
+            Long bairroId) {
+    }
+
+    public record TrocarSenhaRequest(
+            @NotBlank(message = "Informe a senha atual.") String senhaAtual,
+            @NotBlank(message = "Crie a nova senha.") @Size(min = 6, max = 60, message = "A nova senha precisa ter de 6 a 60 caracteres.") String novaSenha) {
+    }
+
+    /** Perfil com os numeros de participacao do cidadao e as notificacoes nao lidas. */
     public record UsuarioResponse(
             long id, String nome, String email, String papel,
             Long bairroId, String bairro, int pontos, boolean fonteGrande,
-            int registradas, int apoios, int resolvidas) {
+            int registradas, int apoios, int resolvidas, int naoLidas) {
     }
 
     public record AuthResponse(String token, UsuarioResponse usuario) {

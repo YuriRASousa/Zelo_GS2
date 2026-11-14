@@ -14,6 +14,7 @@ export interface Usuario {
   registradas: number;
   apoios: number;
   resolvidas: number;
+  naoLidas: number;
 }
 
 export interface Bairro {
@@ -55,7 +56,11 @@ export interface OcorrenciaResumo {
   prazo: string;
 }
 
+export type TipoEvento = 'REGISTRO' | 'STATUS' | 'COMENTARIO' | 'ATRASO';
+
 export interface EventoHistorico {
+  tipo: TipoEvento;
+  papelAutor: 'CIDADAO' | 'GESTOR' | null;
   data: string;
   statusAnterior: Status | null;
   statusNovo: Status;
@@ -68,6 +73,9 @@ export interface OcorrenciaDetalhe extends Omit<OcorrenciaResumo, 'temFoto'> {
   endereco: string | null;
   orgao: string;
   foto: string | null;
+  fotoSolucao: string | null;
+  podeCancelar: boolean;
+  podeComentar: boolean;
   resolucao: string | null;
   autor: string;
   souAutor: boolean;
@@ -101,4 +109,25 @@ export interface ResultadoRotina {
   prioridadesAjustadas: number;
   bairrosConsolidados: number;
   mes: string;
+}
+
+export type TipoNotificacao = 'STATUS' | 'ATRASO' | 'APOIO' | 'COMENTARIO';
+
+export interface Notificacao {
+  id: number;
+  ocorrenciaId: number;
+  protocolo: string;
+  tipo: TipoNotificacao;
+  titulo: string;
+  mensagem: string;
+  lida: boolean;
+  data: string;
+}
+
+export interface LogRotina {
+  data: string;
+  rotina: string;
+  nivel: 'INFO' | 'AVISO' | 'ERRO';
+  linhas: number;
+  mensagem: string;
 }

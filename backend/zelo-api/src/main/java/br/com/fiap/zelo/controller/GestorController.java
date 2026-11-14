@@ -35,17 +35,22 @@ public class GestorController {
         this.painel = painel;
     }
 
-    @Operation(summary = "Fila de atendimento ordenada pela prioridade calculada no banco")
+    @Operation(summary = "Fila de atendimento ordenada pela prioridade calculada no banco",
+            description = "Filtros opcionais: bairro, categoria e somente as atrasadas.")
     @GetMapping("/fila")
-    public List<OcorrenciaResumo> fila() {
-        return ocorrencias.fila();
+    public List<OcorrenciaResumo> fila(@RequestParam(required = false) Long bairroId,
+                                       @RequestParam(required = false) Long categoriaId,
+                                       @RequestParam(defaultValue = "false") boolean somenteAtrasadas) {
+        return ocorrencias.fila(bairroId, categoriaId, somenteAtrasadas);
     }
 
-    @Operation(summary = "Avancar o status (a linha do tempo e gravada pelo trigger)")
+    @Operation(summary = "Avancar o status (a linha do tempo e gravada pelo trigger)",
+            description = "CANCELADA exige comentario (motivo) com 5+ letras. fotoSolucaoBase64 "
+                    + "(JPG/PNG) so e aceita com status RESOLVIDA. Autor e apoiadores sao notificados.")
     @PatchMapping("/ocorrencias/{id}/status")
     public OcorrenciaDetalhe status(@PathVariable long id, @AuthenticationPrincipal UsuarioLogado gestor,
                                     @Valid @RequestBody StatusRequest req) {
-        return ocorrencias.atualizarStatus(id, gestor.id(), req.status(), req.comentario());
+        return ocorrencias.atualizarStatus(id, gestor, req.status(), req.comentario(), req.fotoSolucaoBase64());
     }
 
     @Operation(summary = "Rodar agora a rotina diaria: atrasos, prioridades e indicadores do mes")

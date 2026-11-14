@@ -17,18 +17,22 @@ FUNCIONALIDADES PRINCIPAIS (login e cadastro não contam)
   1. Relatar problema com foto, local no mapa e sinais de risco e de
      acessibilidade. Antes de enviar, o banco avisa se já existe a mesma
      ocorrência a menos de 60 m e sugere apoiar a existente.
-  2. Mapa do bairro com as ocorrências em aberto, ordenadas pela
-     prioridade calculada no banco, e o botão "Também vi esse problema"
-     (apoio), que sobe a prioridade.
-  3. Acompanhamento: protocolo, barra de etapas, prazo, linha do tempo
-     gravada por trigger e avaliação do atendimento (1 a 5 estrelas).
-  4. Painel da transparência por bairro: em aberto, atrasadas, resolvidas,
-     % no prazo, tempo médio, problemas mais relatados e ranking de
-     participação.
-  5. Área do gestor da prefeitura: fila por prioridade, mudança de status
-     com comentário e botão que roda as rotinas PL/SQL do dia.
+  2. Mapa do bairro em tela cheia, com busca por protocolo ou título,
+     filtro por categoria e lista por prioridade calculada no banco;
+     botão "Também vi esse problema" (apoio), que sobe a prioridade.
+  3. Acompanhamento: protocolo, etapas, prazo, foto de antes e depois,
+     mini mapa, linha do tempo, comentários, compartilhar protocolo,
+     cancelar o próprio pedido e avaliar o atendimento (1 a 5 estrelas).
+  4. Notificações geradas pelo banco: mudança de status (para quem
+     relatou e quem apoiou), prazo vencido, apoio novo e comentário.
+  5. Painel da transparência por bairro: em aberto, atrasadas, resolvidas,
+     % no prazo, gráfico de 6 meses, problemas mais relatados e ranking.
+  6. Área do gestor: fila com filtros, mudança de status com comentário,
+     foto da solução, cancelamento só com motivo, rotinas PL/SQL e o
+     histórico das execuções.
+  7. Perfil: pontos e nível, editar nome e bairro, trocar senha.
   Acessibilidade: modo "letras maiores" salvo na conta, rótulos para
-  leitor de tela em todos os controles e alvos de toque de 48 px ou mais.
+  leitor de tela em todos os controles e alvos de toque de 44 px ou mais.
 
 ESTRUTURA DO REPOSITÓRIO
 ------------------------
@@ -64,8 +68,9 @@ COMO EXECUTAR
      python executar_scripts.py --recriar
      python testar_regras.py
    O primeiro instala tudo (e recria do zero se já existir); o segundo
-   executa 26 casos de teste das regras PL/SQL dentro de uma transação
+   executa 48 casos de teste das regras PL/SQL dentro de uma transação
    que é desfeita no final. Pelo SQL Developer: rode 01 a 07 em ordem.
+   Se a API estiver ligada quando o banco for recriado, reinicie a API.
 
 3) API (porta 8080)
      cd backend/zelo-api

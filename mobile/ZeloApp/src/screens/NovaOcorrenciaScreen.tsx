@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
+import * as Clipboard from 'expo-clipboard';
+import { dataCurta, prazoRelativo, protocoloInteiro } from '../utils/formato';
 import {
   Accessibility,
   Camera,
   CircleCheck,
+  Copy,
   Crosshair,
   ImagePlus,
   Send,
@@ -22,8 +25,8 @@ import { ocorrenciaApi } from '../services/zelo';
 import IconeCategoria from '../components/Icone';
 import MapaFrame from '../components/mapa/MapaFrame';
 import { mapaHtml, type MapaRef, type MensagemMapa } from '../components/mapa/mapaHtml';
-import { Botao, Campo, Chip, Faixa } from '../components/ui';
-import { cores, esp, raio } from '../theme/tema';
+import { Botao, Campo, Chip, Faixa, Interruptor, Placa } from '../components/ui';
+import { cores, esp, fontes, raio } from '../theme/tema';
 import { obterFoto, type FotoPronta } from '../utils/foto';
 import type { RaizParams } from '../navigation/tipos';
 
@@ -58,13 +61,22 @@ export default function NovaOcorrenciaScreen() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [localizando, setLocalizando] = useState(false);
+  const [preparandoFoto, setPreparandoFoto] = useState(false);
+  const [erroFoto, setErroFoto] = useState<string | null>(null);
+  const [erroTitulo, setErroTitulo] = useState<string | null>(null);
+  const [jaAcompanha, setJaAcompanha] = useState(false);
+  const [confirmandoOutro, setConfirmandoOutro] = useState(false);
+  /** Duplicata apontada ao enviar: o aviso aparece so junto do botao. */
+  const [duplicataNoEnvio, setDuplicataNoEnvio] = useState(false);
+  const [prazoCriada, setPrazoCriada] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
   const [criada, setCriada] = useState<{ id: number; protocolo: string } | null>(null);
   const [mapaPronto, setMapaPronto] = useState(false);
   const mapa = useRef<MapaRef>(null);
 
   const categoria = categorias.find((c) => c.id === categoriaId);
   const html = useMemo(
-    () => mapaHtml(inicial?.latitude ?? -23.5505, inicial?.longitude ?? -46.6333, 15),
+    () => mapaHtml(inicial?.latitude ?? -23.5505, inicial?.longitude ?? -46.6333, 15, false, true),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -83,12 +95,20 @@ export default function NovaOcorrenciaScreen() {
   // marcador nao dispara uma requisicao por pixel, e a anterior e cancelada.
   useEffect(() => {
     setDuplicada(null);
+    setJaAcompanha(false);
+    setConfirmandoOutro(false);
+    setDuplicataNoEnvio(false);
     if (!categoriaId || !ponto) return;
     const controle = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const d = await ocorrenciaApi.duplicada(categoriaId, ponto.lat, ponto.lon, controle.signal);
         setDuplicada(d && d.id ? d : null);
+        // Se a pessoa ja relatou ou apoiou a parecida, o aviso muda para "voce ja acompanha".
+        if (d && d.id) {
+          const det = await ocorrenciaApi.detalhe(d.id, controle.signal);
+          setJaAcompanha(det.jaApoiei || det.souAutor);
+        }
       } catch (e) {
         if (!foiCancelada(e)) setDuplicada(null);
       }
@@ -153,20 +173,30 @@ export default function NovaOcorrenciaScreen() {
   }
 
   async function escolherFoto(origem: 'camera' | 'galeria') {
-    setErro(null);
+    setErroFoto(null);
+    setPreparandoFoto(true);
     try {
       const f = await obterFoto(origem);
       if (f) setFoto(f);
     } catch (e) {
-      setErro((e as Error).message);
+      setErroFoto((e as Error).message);
+    } finally {
+      setPreparandoFoto(false);
     }
   }
 
-  async function enviar() {
+  async function enviar(ignorarDuplicada = false) {
     setErro(null);
-    if (!categoriaId) return setErro('Escolha o tipo de problema.');
-    if (!ponto || !bairroId) return setErro('Marque no mapa onde fica o problema.');
-    if (titulo.trim().length < 5) return setErro('Escreva um título com pelo menos 5 letras.');
+    // Mostra tudo o que falta de uma vez, em vez de um erro por tentativa.
+    const faltas: string[] = [];
+    if (!categoriaId) faltas.push('escolha o tipo de problema');
+    if (!ponto || !bairroId) faltas.push('marque no mapa onde fica');
+    if (titulo.trim().length < 5) faltas.push('escreva um título com pelo menos 5 letras');
+    setErroTitulo(titulo.trim().length < 5 ? 'Pelo menos 5 letras, por exemplo: Poste apagado na esquina.' : null);
+    if (faltas.length) {
+      return setErro(`Para enviar, ${faltas.join(', ').replace(/, ([^,]*)$/, ' e $1')}.`);
+    }
+    if (!categoriaId || !ponto || !bairroId) return;
     setEnviando(true);
     try {
       const r = await ocorrenciaApi.registrar({
@@ -180,13 +210,25 @@ export default function NovaOcorrenciaScreen() {
         risco,
         acessibilidade,
         fotoBase64: foto?.base64 ?? null,
+        ignorarDuplicada,
       });
       setCriada(r);
       recarregar().catch(() => {});
+      // O prazo foi calculado pelo banco; busca para mostrar no comprovante.
+      ocorrenciaApi.detalhe(r.id).then((d) => setPrazoCriada(d.prazo)).catch(() => {});
     } catch (e) {
       // Duplicidade detectada pela procedure (corrida com outro morador).
       if (e instanceof ErroApi && e.referenciaId) {
-        setDuplicada({ id: e.referenciaId, protocolo: '', titulo: e.message });
+        const id = e.referenciaId;
+        setDuplicataNoEnvio(true);
+        setDuplicada({ id, protocolo: '', titulo: e.message });
+        ocorrenciaApi
+          .detalhe(id)
+          .then((d) => {
+            setDuplicada({ id, protocolo: d.protocolo, titulo: d.titulo });
+            setJaAcompanha(d.jaApoiei || d.souAutor);
+          })
+          .catch(() => {});
       } else {
         setErro((e as Error).message);
       }
@@ -200,10 +242,12 @@ export default function NovaOcorrenciaScreen() {
     setErro(null);
     try {
       await ocorrenciaApi.apoiar(duplicada.id);
-      setAviso('Apoio registrado. A prioridade da ocorrência subiu.');
+      setAviso('Apoio registrado. A prioridade da ocorrência subiu e você vai receber os avisos dela.');
     } catch (e) {
       setAviso(null);
-      setErro((e as Error).message);
+      // Ja apoiava: nao e erro, so informa que ja acompanha.
+      if (e instanceof ErroApi && e.status === 409 && /apoiou|registrou/.test(e.message)) setJaAcompanha(true);
+      else setErro((e as Error).message);
     }
   }
 
@@ -211,15 +255,25 @@ export default function NovaOcorrenciaScreen() {
     return (
       <View style={s.sucesso}>
         <View style={s.selo}>
-          <CircleCheck size={40} color={cores.primaria} />
+          <CircleCheck size={40} color={cores.placa} />
         </View>
-        <Text style={[tx.titulo, { textAlign: 'center' }]}>Ocorrência registrada</Text>
+        <Text style={[tx.display, { textAlign: 'center' }]}>Pedido enviado</Text>
         <Text style={[tx.corpo, { textAlign: 'center' }]}>Guarde o protocolo. Ele é a prova do seu pedido.</Text>
-        <Text style={s.protocolo} selectable accessibilityLabel={`Protocolo ${criada.protocolo}`}>
-          {criada.protocolo}
-        </Text>
+        <Placa texto={criada.protocolo} tamanho="g" estilo={{ alignSelf: 'center' }} rotuloAcessivel={`Protocolo ${criada.protocolo}`} />
+        <Botao
+          titulo={copiado ? 'Protocolo copiado' : 'Copiar protocolo'}
+          icone={copiado ? CircleCheck : Copy}
+          variante="fantasma"
+          compacto
+          onPress={() => Clipboard.setStringAsync(criada.protocolo).then(() => setCopiado(true)).catch(() => {})}
+        />
+        {prazoCriada ? (
+          <Text style={[tx.corpoForte, { textAlign: 'center' }]}>
+            Prazo de atendimento: {dataCurta(prazoCriada)} ({prazoRelativo(prazoCriada).texto})
+          </Text>
+        ) : null}
         <Text style={[tx.legenda, { textAlign: 'center', maxWidth: 320 }]}>
-          Prazo e prioridade já foram calculados. Você recebeu 10 pontos de participação.
+          Você vai receber um aviso a cada mudança e ganhou 10 pontos de participação.
         </Text>
         <Botao
           titulo="Acompanhar ocorrência"
@@ -243,11 +297,12 @@ export default function NovaOcorrenciaScreen() {
                 onPress={() => setCategoriaId(c.id)}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: ativo }}
+                aria-checked={ativo}
                 accessibilityLabel={`${c.nome}. Prazo de ${c.prazoDias} dias.`}
-                style={[s.categoria, ativo && s.categoriaAtiva]}
+                style={[s.categoria, tx.escala > 1 && { width: '48.5%' }, ativo && s.categoriaAtiva]}
               >
-                <IconeCategoria nome={c.icone} tamanho={24} cor={ativo ? cores.branco : cores.primaria} />
-                <Text style={[tx.legenda, { color: ativo ? cores.branco : cores.tinta, fontWeight: '700', textAlign: 'center' }]}>
+                <IconeCategoria nome={c.icone} tamanho={24} cor={ativo ? cores.branco : cores.placa} />
+                <Text style={[tx.rotulo, { color: ativo ? cores.branco : cores.tinta, textAlign: 'center' }]}>
                   {c.nome}
                 </Text>
               </Pressable>
@@ -276,37 +331,50 @@ export default function NovaOcorrenciaScreen() {
         />
         <View style={s.chips}>
           {bairros.map((b) => (
-            <Chip key={b.id} texto={b.nome} ativo={bairroId === b.id} onPress={() => setBairroId(b.id)} />
+            <Chip
+              key={b.id}
+              texto={b.nome}
+              ativo={bairroId === b.id}
+              onPress={() => {
+                // Trocar o bairro leva o mapa e o marcador para la; a pessoa so ajusta o ponto.
+                setBairroId(b.id);
+                const p = { lat: b.latitude, lon: b.longitude };
+                setPonto(p);
+                mapa.current?.enviar({ tipo: 'escolha', lat: p.lat, lon: p.lon });
+              }}
+            />
           ))}
         </View>
         <Campo rotulo="Endereço ou referência (opcional)" value={endereco} onChangeText={setEndereco} placeholder="Ex.: em frente ao nº 120" />
       </Secao>
 
-      {duplicada ? (
+      {duplicada && !duplicataNoEnvio && !confirmandoOutro ? (
         <Faixa
           tipo="info"
           texto={
-            duplicada.protocolo
-              ? `Já existe a ocorrência ${duplicada.protocolo} aqui perto: "${duplicada.titulo}". Apoiar a existente aumenta a prioridade dela.`
-              : duplicada.titulo
+            jaAcompanha
+              ? `Você já acompanha a ocorrência ${protocoloInteiro(duplicada.protocolo)} sobre esse problema.`
+              : duplicada.protocolo
+                ? `Já existe a ocorrência ${protocoloInteiro(duplicada.protocolo)} aqui perto: "${duplicada.titulo}". Apoiar a existente aumenta a prioridade dela.`
+                : duplicada.titulo
           }
           acao={
             <View style={s.chips}>
-              <Botao titulo="Apoiar a existente" icone={ThumbsUp} onPress={apoiarExistente} estilo={{ minHeight: 42 }} />
+              {jaAcompanha ? null : <Botao titulo="Apoiar a existente" icone={ThumbsUp} onPress={apoiarExistente} estilo={{ minHeight: 44 }} />}
+              <Botao titulo="É outro problema" variante="secundario" onPress={() => setConfirmandoOutro(true)} estilo={{ minHeight: 44 }} />
               <Botao
                 titulo="Ver detalhes"
                 variante="secundario"
                 onPress={() => navegacao.navigate('Detalhe', { id: duplicada.id })}
-                estilo={{ minHeight: 42 }}
+                estilo={{ minHeight: 44 }}
               />
             </View>
           }
         />
       ) : null}
-      {aviso ? <Faixa tipo="sucesso" texto={aviso} /> : null}
-
+      
       <Secao numero={3} titulo="Conte o que está acontecendo">
-        <Campo rotulo="Título" value={titulo} onChangeText={setTitulo} placeholder="Ex.: Poste apagado na esquina" maxLength={120} />
+        <Campo rotulo="Título" value={titulo} onChangeText={(t) => { setTitulo(t); if (t.trim().length >= 5) setErroTitulo(null); }} placeholder="Ex.: Poste apagado na esquina" maxLength={120} erro={erroTitulo} />
         <Campo
           rotulo="Detalhes (opcional)"
           value={descricao}
@@ -324,7 +392,7 @@ export default function NovaOcorrenciaScreen() {
           aoMudar={setRisco}
         />
         <Alternar
-          icone={<Accessibility size={20} color={cores.info} />}
+          icone={<Accessibility size={20} color={cores.placa} />}
           titulo="Atrapalha quem tem deficiência ou mobilidade reduzida"
           texto="Calçada bloqueada, rampa ou piso tátil."
           valor={acessibilidade}
@@ -343,14 +411,46 @@ export default function NovaOcorrenciaScreen() {
           </View>
         ) : (
           <View style={s.chips}>
-            <Botao titulo="Câmera" icone={Camera} variante="secundario" onPress={() => escolherFoto('camera')} estilo={{ flex: 1 }} />
-            <Botao titulo="Galeria" icone={ImagePlus} variante="secundario" onPress={() => escolherFoto('galeria')} estilo={{ flex: 1 }} />
+            <Botao titulo="Câmera" icone={Camera} variante="secundario" onPress={() => escolherFoto('camera')} estilo={{ flex: 1 }} desabilitado={preparandoFoto} />
+            <Botao titulo="Galeria" icone={ImagePlus} variante="secundario" onPress={() => escolherFoto('galeria')} estilo={{ flex: 1 }} carregando={preparandoFoto} />
           </View>
         )}
+        {preparandoFoto ? <Text style={tx.legenda} accessibilityLiveRegion="polite">Preparando a foto para envio...</Text> : null}
+        {erroFoto ? <Faixa tipo="erro" texto={erroFoto} /> : null}
       </Secao>
 
       {erro ? <Faixa tipo="erro" texto={erro} /> : null}
-      <Botao titulo="Enviar para a prefeitura" icone={Send} onPress={enviar} carregando={enviando} />
+      {duplicada && (duplicataNoEnvio || confirmandoOutro) ? (
+        <Faixa
+          tipo="info"
+          texto={
+            confirmandoOutro
+              ? `Confirme que é um problema diferente do que já foi relatado aqui perto${duplicada.protocolo ? ` (${protocoloInteiro(duplicada.protocolo)})` : ''}. Toque em Enviar mesmo assim.`
+              : jaAcompanha
+                ? `Você já acompanha a ocorrência${duplicada.protocolo ? ` ${protocoloInteiro(duplicada.protocolo)}` : ''} sobre esse problema.`
+                : `Esse problema já foi relatado aqui perto${duplicada.protocolo ? ` (${protocoloInteiro(duplicada.protocolo)})` : ''}. Apoie o pedido existente em vez de enviar outro.`
+          }
+          acao={
+            <View style={s.chips}>
+              {confirmandoOutro ? null : jaAcompanha ? (
+                <Botao titulo="Ver ocorrência" compacto onPress={() => navegacao.navigate('Detalhe', { id: duplicada.id })} />
+              ) : (
+                <Botao titulo="Apoiar a existente" icone={ThumbsUp} onPress={apoiarExistente} compacto />
+              )}
+              {confirmandoOutro ? (
+                <>
+                  <Botao titulo="Enviar mesmo assim" icone={Send} variante="sinal" compacto carregando={enviando} onPress={() => enviar(true)} />
+                  <Botao titulo="Voltar" variante="secundario" compacto onPress={() => setConfirmandoOutro(false)} />
+                </>
+              ) : (
+                <Botao titulo="É outro problema" variante="secundario" compacto onPress={() => setConfirmandoOutro(true)} />
+              )}
+            </View>
+          }
+        />
+      ) : null}
+      {aviso ? <Faixa tipo="sucesso" texto={aviso} /> : null}
+      {confirmandoOutro ? null : <Botao titulo="Enviar para a prefeitura" icone={Send} variante="sinal" onPress={() => enviar()} carregando={enviando && !confirmandoOutro} desabilitado={preparandoFoto} />}
     </ScrollView>
   );
 }
@@ -361,9 +461,9 @@ function Secao({ numero, titulo, children }: { numero: number; titulo: string; c
     <View style={s.secao}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: esp(2.5) }}>
         <View style={s.numero}>
-          <Text style={{ color: cores.branco, fontWeight: '800', fontSize: 13 }}>{numero}</Text>
+          <Text style={{ color: cores.branco, fontFamily: fontes.condensadaNegrito, fontSize: 15 }}>{numero}</Text>
         </View>
-        <Text style={tx.subtitulo} accessibilityRole="header">
+        <Text style={tx.tituloMenor} accessibilityRole="header">
           {titulo}
         </Text>
       </View>
@@ -387,12 +487,7 @@ function Alternar(props: { icone: React.ReactNode; titulo: string; texto: string
         <Text style={tx.corpoForte}>{props.titulo}</Text>
         <Text style={tx.legenda}>{props.texto}</Text>
       </View>
-      <Switch
-        value={props.valor}
-        onValueChange={props.aoMudar}
-        trackColor={{ true: cores.primariaMedia, false: cores.linha }}
-        thumbColor={cores.branco}
-      />
+      <Interruptor valor={props.valor} aoMudar={props.aoMudar} rotulo={props.titulo} />
     </Pressable>
   );
 }
@@ -400,18 +495,16 @@ function Alternar(props: { icone: React.ReactNode; titulo: string; texto: string
 const s = StyleSheet.create({
   conteudo: { padding: esp(4), gap: esp(4), paddingBottom: esp(12), maxWidth: 640, width: '100%', alignSelf: 'center' },
   secao: {
-    backgroundColor: cores.branco,
+    backgroundColor: cores.superficie,
     borderRadius: raio.g,
-    borderWidth: 1,
-    borderColor: cores.linha,
-    padding: esp(4),
-    gap: esp(3),
+    padding: esp(5),
+    gap: esp(4),
   },
   numero: {
     width: 26,
     height: 26,
-    borderRadius: 13,
-    backgroundColor: cores.primaria,
+    borderRadius: raio.placa,
+    backgroundColor: cores.placa,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -421,14 +514,14 @@ const s = StyleSheet.create({
     minHeight: 86,
     borderRadius: raio.m,
     borderWidth: 1.5,
-    borderColor: cores.linha,
+    borderColor: cores.fundo,
     alignItems: 'center',
     justifyContent: 'center',
     gap: esp(1.5),
     padding: esp(2),
     backgroundColor: cores.fundo,
   },
-  categoriaAtiva: { backgroundColor: cores.primaria, borderColor: cores.primaria },
+  categoriaAtiva: { backgroundColor: cores.placa, borderColor: cores.placa },
   mapa: { height: 230, borderRadius: raio.m, overflow: 'hidden', borderWidth: 1, borderColor: cores.linha },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: esp(2) },
   alternar: {
@@ -456,19 +549,8 @@ const s = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: cores.primariaClara,
+    backgroundColor: cores.placaClara,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  protocolo: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: cores.primaria,
-    letterSpacing: 1,
-    backgroundColor: cores.primariaClara,
-    paddingHorizontal: esp(5),
-    paddingVertical: esp(3),
-    borderRadius: raio.m,
-    overflow: 'hidden',
   },
 });

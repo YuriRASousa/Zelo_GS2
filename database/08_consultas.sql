@@ -49,3 +49,13 @@ SELECT dt_execucao, nm_rotina, tp_nivel, qt_linhas, ds_mensagem
   FROM zl_log_rotina
  ORDER BY id_log DESC
  FETCH FIRST 15 ROWS ONLY;
+
+-- 8. Notificacoes nao lidas de um cidadao (sininho do app)
+SELECT n.dt_criacao, n.tp_notificacao, o.cd_protocolo, n.ds_titulo, n.ds_mensagem
+  FROM zl_notificacao n
+  JOIN zl_ocorrencia o ON o.id_ocorrencia = n.id_ocorrencia
+ WHERE n.id_usuario = 1 AND n.fl_lida = 'N'
+ ORDER BY n.dt_criacao DESC;
+
+-- 9. Linha do tempo por tipo de evento
+SELECT tp_evento, COUNT(*) FROM zl_historico GROUP BY tp_evento ORDER BY 1;

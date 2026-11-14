@@ -21,7 +21,8 @@ public class UsuarioRepository {
                    (SELECT COUNT(*) FROM zl_ocorrencia o WHERE o.id_usuario = u.id_usuario) AS qt_registradas,
                    (SELECT COUNT(*) FROM zl_apoio a WHERE a.id_usuario = u.id_usuario) AS qt_apoios,
                    (SELECT COUNT(*) FROM zl_ocorrencia o WHERE o.id_usuario = u.id_usuario
-                       AND o.st_ocorrencia = 'RESOLVIDA') AS qt_resolvidas
+                       AND o.st_ocorrencia = 'RESOLVIDA') AS qt_resolvidas,
+                   pkg_zl_notificacao.nao_lidas(u.id_usuario) AS qt_nao_lidas
               FROM zl_usuario u
               LEFT JOIN zl_bairro b ON b.id_bairro = u.id_bairro
              WHERE u.id_usuario = ?
@@ -68,7 +69,33 @@ public class UsuarioRepository {
                 Colunas.flag(rs, "fl_fonte_grande"),
                 rs.getInt("qt_registradas"),
                 rs.getInt("qt_apoios"),
-                rs.getInt("qt_resolvidas")), id).stream().findFirst();
+                rs.getInt("qt_resolvidas"),
+                rs.getInt("qt_nao_lidas")), id).stream().findFirst();
+    }
+
+    public Optional<String> papel(long id) {
+        return jdbc.query("SELECT tp_papel FROM zl_usuario WHERE id_usuario = ?",
+                (rs, i) -> rs.getString(1), id).stream().findFirst();
+    }
+
+    public boolean bairroExiste(long bairroId) {
+        Integer qt = jdbc.queryForObject("SELECT COUNT(*) FROM zl_bairro WHERE id_bairro = ?",
+                Integer.class, bairroId);
+        return qt != null && qt > 0;
+    }
+
+    public void atualizarPerfil(long id, String nome, Long bairroId) {
+        jdbc.update("UPDATE zl_usuario SET nm_usuario = ?, id_bairro = ? WHERE id_usuario = ?",
+                nome.trim(), bairroId, id);
+    }
+
+    public Optional<String> hashSenha(long id) {
+        return jdbc.query("SELECT ds_senha_hash FROM zl_usuario WHERE id_usuario = ?",
+                (rs, i) -> rs.getString(1), id).stream().findFirst();
+    }
+
+    public void atualizarSenha(long id, String hash) {
+        jdbc.update("UPDATE zl_usuario SET ds_senha_hash = ? WHERE id_usuario = ?", hash, id);
     }
 
     public void atualizarFonteGrande(long id, boolean fonteGrande) {

@@ -1,8 +1,14 @@
 -- =====================================================================
 -- ZELO | 06_seed.sql
 -- Carga de demonstracao. As datas sao relativas a SYSDATE, entao o
--- banco sempre fica com ocorrencias recentes, algumas no prazo, algumas
--- atrasadas e algumas resolvidas e avaliadas.
+-- banco sempre fica com:
+--   * ocorrencias recentes (ultimas 6 semanas), algumas no prazo, algumas
+--     atrasadas e algumas resolvidas e avaliadas;
+--   * historico de ~6 meses: ocorrencias antigas ja resolvidas (ou
+--     canceladas com motivo), espalhadas pelos meses e bairros, para o
+--     grafico mes a mes do painel ter dados reais;
+--   * notificacoes coerentes com cada evento (as dos ultimos 7 dias ficam
+--     como nao lidas).
 --
 -- Logins (senha):
 --   ana@zelo.app       123456     cidada, Itaquera
@@ -13,7 +19,7 @@
 --
 -- De proposito, a carga NAO roda detectar_atrasos nem gera os
 -- indicadores do mes atual: assim as rotinas tem trabalho de verdade
--- na demonstracao.
+-- na demonstracao. Os 5 meses anteriores ja saem consolidados.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -40,81 +46,309 @@ INSERT INTO zl_categoria VALUES (7, 'Sinalização de trânsito',  'traffic-cone
 INSERT INTO zl_categoria VALUES (8, 'Alagamento e bueiro',      'cloud-rain',     5, 4, 'Drenagem urbana');
 
 -- ---------------------------------------------------------------------
--- Usuarios (hash BCrypt das senhas acima)
+-- Usuarios (hash BCrypt das senhas acima). Cadastro antigo o bastante
+-- para cobrir o historico de 6 meses.
 -- ---------------------------------------------------------------------
 INSERT INTO zl_usuario (id_usuario, nm_usuario, ds_email, ds_senha_hash, tp_papel, id_bairro, fl_fonte_grande, dt_cadastro)
 VALUES (seq_zl_usuario.NEXTVAL, 'Ana Paula Ribeiro', 'ana@zelo.app',
-        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 1, 'N', SYSDATE - 60);
+        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 1, 'N', TRUNC(SYSDATE) - 210);
 INSERT INTO zl_usuario (id_usuario, nm_usuario, ds_email, ds_senha_hash, tp_papel, id_bairro, fl_fonte_grande, dt_cadastro)
 VALUES (seq_zl_usuario.NEXTVAL, 'Joaquim Ferreira', 'joaquim@zelo.app',
-        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 1, 'S', SYSDATE - 45);
+        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 1, 'S', TRUNC(SYSDATE) - 200);
 INSERT INTO zl_usuario (id_usuario, nm_usuario, ds_email, ds_senha_hash, tp_papel, id_bairro, fl_fonte_grande, dt_cadastro)
 VALUES (seq_zl_usuario.NEXTVAL, 'Mariana Costa', 'mariana@zelo.app',
-        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 2, 'N', SYSDATE - 40);
+        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 2, 'N', TRUNC(SYSDATE) - 195);
 INSERT INTO zl_usuario (id_usuario, nm_usuario, ds_email, ds_senha_hash, tp_papel, id_bairro, fl_fonte_grande, dt_cadastro)
 VALUES (seq_zl_usuario.NEXTVAL, 'Carlos Mendes', 'carlos@zelo.app',
-        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 3, 'N', SYSDATE - 35);
+        '$2b$10$a6yfgeNbyWNbJtGyas7zv.5C2muryYLS2kSY/XqmFet6VmQ422YSm', 'CIDADAO', 3, 'N', TRUNC(SYSDATE) - 190);
 INSERT INTO zl_usuario (id_usuario, nm_usuario, ds_email, ds_senha_hash, tp_papel, id_bairro, fl_fonte_grande, dt_cadastro)
 VALUES (seq_zl_usuario.NEXTVAL, 'Equipe Subprefeitura', 'gestor@zelo.app',
-        '$2b$10$THVGDPv0ReC5f3roSJHWj.ZA.fKzPvFr4i9NKIqiUv4MHogsv0BX.', 'GESTOR', NULL, 'N', SYSDATE - 90);
+        '$2b$10$THVGDPv0ReC5f3roSJHWj.ZA.fKzPvFr4i9NKIqiUv4MHogsv0BX.', 'GESTOR', NULL, 'N', TRUNC(SYSDATE) - 240);
 
 COMMIT;
 
 -- ---------------------------------------------------------------------
--- Ocorrencias com historico. Os ids de usuario seguem a ordem acima:
--- 1 Ana, 2 Joaquim, 3 Mariana, 4 Carlos, 5 Gestor.
+-- Ocorrencias com historico e notificacoes. Os ids de usuario seguem a
+-- ordem acima: 1 Ana, 2 Joaquim, 3 Mariana, 4 Carlos, 5 Gestor.
+--
+-- Os helpers usam as mesmas rotinas de notificacao do app e depois
+-- voltam a data de cada linha para o dia do evento.
 -- ---------------------------------------------------------------------
 DECLARE
+    c_gestor CONSTANT NUMBER := 5;
     v_id NUMBER;
 
-    FUNCTION nova(p_usuario NUMBER, p_cat NUMBER, p_bairro NUMBER,
-                  p_titulo VARCHAR2, p_desc VARCHAR2, p_end VARCHAR2,
-                  p_lat NUMBER, p_lon NUMBER, p_risco CHAR, p_acess CHAR,
-                  p_dias NUMBER) RETURN NUMBER
+    -- Ultimo id de notificacao antes de um evento (para datar as novas).
+    FUNCTION marca RETURN NUMBER IS
+        v NUMBER;
+    BEGIN
+        SELECT NVL(MAX(id_notificacao), 0) INTO v FROM zl_notificacao;
+        RETURN v;
+    END marca;
+
+    PROCEDURE datar_notificacoes(p_desde NUMBER, p_dt DATE) IS
+    BEGIN
+        UPDATE zl_notificacao SET dt_criacao = p_dt WHERE id_notificacao > p_desde;
+    END datar_notificacoes;
+
+    FUNCTION nova_em(p_usuario NUMBER, p_cat NUMBER, p_bairro NUMBER,
+                     p_titulo VARCHAR2, p_desc VARCHAR2, p_end VARCHAR2,
+                     p_lat NUMBER, p_lon NUMBER, p_risco CHAR, p_acess CHAR,
+                     p_dt DATE) RETURN NUMBER
     IS
         v_novo NUMBER := seq_zl_ocorrencia.NEXTVAL;
-        v_dt   DATE   := TRUNC(SYSDATE) - p_dias + (9 + MOD(v_novo * 7, 10)) / 24;
     BEGIN
         INSERT INTO zl_ocorrencia (
             id_ocorrencia, cd_protocolo, id_usuario, id_categoria, id_bairro,
             ds_titulo, ds_descricao, ds_endereco, nr_latitude, nr_longitude,
             fl_risco, fl_acessibilidade, dt_abertura, dt_prazo)
         VALUES (
-            v_novo, pkg_zl_ocorrencia.gerar_protocolo(v_novo, v_dt),
+            v_novo, pkg_zl_ocorrencia.gerar_protocolo(v_novo, p_dt),
             p_usuario, p_cat, p_bairro, p_titulo, p_desc, p_end, p_lat, p_lon,
-            p_risco, p_acess, v_dt,
-            pkg_zl_ocorrencia.calcular_prazo(p_cat, p_risco, v_dt));
+            p_risco, p_acess, p_dt,
+            pkg_zl_ocorrencia.calcular_prazo(p_cat, p_risco, p_dt));
         RETURN v_novo;
+    END nova_em;
+
+    FUNCTION nova(p_usuario NUMBER, p_cat NUMBER, p_bairro NUMBER,
+                  p_titulo VARCHAR2, p_desc VARCHAR2, p_end VARCHAR2,
+                  p_lat NUMBER, p_lon NUMBER, p_risco CHAR, p_acess CHAR,
+                  p_dias NUMBER) RETURN NUMBER
+    IS
+    BEGIN
+        RETURN nova_em(p_usuario, p_cat, p_bairro, p_titulo, p_desc, p_end, p_lat, p_lon,
+                       p_risco, p_acess,
+                       TRUNC(SYSDATE) - p_dias + (9 + MOD(p_dias * 7, 10)) / 24);
     END nova;
 
-    PROCEDURE mover(p_id NUMBER, p_status VARCHAR2, p_coment VARCHAR2, p_dias NUMBER) IS
-        v_dt DATE := TRUNC(SYSDATE) - p_dias + 14 / 24;
+    PROCEDURE mover_em(p_id NUMBER, p_status VARCHAR2, p_coment VARCHAR2, p_dt DATE) IS
+        v_marca NUMBER := marca;
     BEGIN
         pkg_zl_ocorrencia.g_comentario := p_coment;
-        pkg_zl_ocorrencia.g_usuario    := 5;
+        pkg_zl_ocorrencia.g_usuario    := c_gestor;
         UPDATE zl_ocorrencia
            SET st_ocorrencia = p_status,
-               dt_resolucao  = CASE WHEN p_status = 'RESOLVIDA' THEN v_dt END
+               dt_resolucao  = CASE WHEN p_status = 'RESOLVIDA' THEN p_dt END
          WHERE id_ocorrencia = p_id;
         pkg_zl_ocorrencia.g_comentario := NULL;
         pkg_zl_ocorrencia.g_usuario    := NULL;
         -- O trigger grava com SYSDATE; aqui a data volta para o passado.
-        UPDATE zl_historico SET dt_evento = v_dt
+        UPDATE zl_historico SET dt_evento = p_dt
          WHERE id_historico = (SELECT MAX(id_historico) FROM zl_historico WHERE id_ocorrencia = p_id);
+        pkg_zl_notificacao.status_alterado(p_id, p_status, p_coment, c_gestor);
+        datar_notificacoes(v_marca, p_dt);
+    END mover_em;
+
+    PROCEDURE mover(p_id NUMBER, p_status VARCHAR2, p_coment VARCHAR2, p_dias NUMBER) IS
+    BEGIN
+        mover_em(p_id, p_status, p_coment, TRUNC(SYSDATE) - p_dias + 14 / 24);
     END mover;
+
+    PROCEDURE apoio_em(p_id NUMBER, p_usuario NUMBER, p_dt DATE) IS
+        v_marca NUMBER := marca;
+    BEGIN
+        INSERT INTO zl_apoio VALUES (p_id, p_usuario, p_dt);
+        UPDATE zl_ocorrencia SET qt_apoios = qt_apoios + 1 WHERE id_ocorrencia = p_id;
+        pkg_zl_notificacao.apoio_recebido(p_id, p_usuario);
+        datar_notificacoes(v_marca, p_dt);
+    END apoio_em;
 
     PROCEDURE apoio(p_id NUMBER, p_usuario NUMBER, p_dias NUMBER) IS
     BEGIN
-        INSERT INTO zl_apoio VALUES (p_id, p_usuario, TRUNC(SYSDATE) - p_dias + 0.5);
-        UPDATE zl_ocorrencia SET qt_apoios = qt_apoios + 1 WHERE id_ocorrencia = p_id;
+        apoio_em(p_id, p_usuario, TRUNC(SYSDATE) - p_dias + 0.5);
     END apoio;
+
+    PROCEDURE comentario(p_id NUMBER, p_usuario NUMBER, p_texto VARCHAR2, p_dias NUMBER) IS
+        v_marca  NUMBER := marca;
+        v_dt     DATE   := TRUNC(SYSDATE) - p_dias + 11 / 24;
+    BEGIN
+        INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
+                                  ds_comentario, id_usuario, tp_evento, dt_evento)
+        SELECT seq_zl_historico.NEXTVAL, id_ocorrencia, st_ocorrencia, st_ocorrencia,
+               p_texto, p_usuario, 'COMENTARIO', v_dt
+          FROM zl_ocorrencia WHERE id_ocorrencia = p_id;
+        pkg_zl_notificacao.comentario_novo(p_id, p_usuario, p_texto);
+        datar_notificacoes(v_marca, v_dt);
+    END comentario;
 
     PROCEDURE avaliacao(p_id NUMBER, p_nota NUMBER, p_coment VARCHAR2) IS
     BEGIN
         INSERT INTO zl_avaliacao (id_ocorrencia, nr_nota, ds_comentario, dt_avaliacao)
-        SELECT p_id, p_nota, p_coment, dt_resolucao + 1 FROM zl_ocorrencia WHERE id_ocorrencia = p_id;
+        SELECT p_id, p_nota, p_coment, LEAST(dt_resolucao + 1, SYSDATE)
+          FROM zl_ocorrencia WHERE id_ocorrencia = p_id;
     END avaliacao;
+
+    -- -----------------------------------------------------------------
+    -- Textos do historico de 6 meses (2 variacoes por categoria).
+    -- -----------------------------------------------------------------
+    FUNCTION titulo_hist(p_cat NUMBER, p_v NUMBER) RETURN VARCHAR2 IS
+    BEGIN
+        RETURN CASE p_cat * 10 + p_v
+            WHEN 11 THEN 'Buraco na pista perto do ponto de ônibus'
+            WHEN 12 THEN 'Asfalto afundado na esquina'
+            WHEN 21 THEN 'Poste apagado no meio do quarteirão'
+            WHEN 22 THEN 'Lâmpada do poste piscando a noite toda'
+            WHEN 31 THEN 'Calçada quebrada com degrau alto'
+            WHEN 32 THEN 'Rampa de acessibilidade danificada'
+            WHEN 41 THEN 'Lixo acumulado na esquina'
+            WHEN 42 THEN 'Entulho de obra deixado na calçada'
+            WHEN 51 THEN 'Vazamento de água na calçada'
+            WHEN 52 THEN 'Cano estourado na sarjeta'
+            WHEN 61 THEN 'Galho ameaçando cair sobre a calçada'
+            WHEN 62 THEN 'Árvore com cupim e tronco oco'
+            WHEN 71 THEN 'Faixa de pedestre apagada'
+            WHEN 72 THEN 'Placa de velocidade derrubada'
+            WHEN 81 THEN 'Bueiro entupido na esquina'
+            ELSE         'Rua alaga com qualquer chuva'
+        END;
+    END titulo_hist;
+
+    FUNCTION descricao_hist(p_cat NUMBER) RETURN VARCHAR2 IS
+    BEGIN
+        RETURN CASE p_cat
+            WHEN 1 THEN 'Os carros desviam de repente e já teve moto caindo aqui.'
+            WHEN 2 THEN 'O trecho fica escuro e os moradores evitam passar à noite.'
+            WHEN 3 THEN 'Quem usa cadeira de rodas ou carrinho de bebê precisa ir pela rua.'
+            WHEN 4 THEN 'O acúmulo atrai ratos e o cheiro está forte.'
+            WHEN 5 THEN 'A água escorre o dia todo pela calçada.'
+            WHEN 6 THEN 'Com vento forte a árvore balança muito perto da fiação.'
+            WHEN 7 THEN 'Os motoristas não respeitam a travessia sem a sinalização.'
+            ELSE        'Quando chove a água invade a calçada e o portão das casas.'
+        END;
+    END descricao_hist;
+
+    FUNCTION solucao_hist(p_cat NUMBER) RETURN VARCHAR2 IS
+    BEGIN
+        RETURN CASE p_cat
+            WHEN 1 THEN 'Buraco tapado e asfalto nivelado.'
+            WHEN 2 THEN 'Lâmpada trocada por LED.'
+            WHEN 3 THEN 'Calçada refeita com rampa no padrão de acessibilidade.'
+            WHEN 4 THEN 'Material recolhido e área limpa.'
+            WHEN 5 THEN 'Tubulação consertada pela companhia de saneamento.'
+            WHEN 6 THEN 'Poda de segurança realizada.'
+            WHEN 7 THEN 'Sinalização refeita.'
+            ELSE        'Galeria desobstruída e bueiro limpo.'
+        END;
+    END solucao_hist;
+
+    FUNCTION rua_hist(p_bairro NUMBER, p_v NUMBER) RETURN VARCHAR2 IS
+    BEGIN
+        RETURN CASE p_bairro * 10 + p_v
+            WHEN 11 THEN 'Av. Itaquera'
+            WHEN 12 THEN 'Rua Gregório Ramalho'
+            WHEN 13 THEN 'Rua Victório Santim'
+            WHEN 21 THEN 'Rua Joaquim Távora'
+            WHEN 22 THEN 'Rua França Pinto'
+            WHEN 23 THEN 'Rua Domingos de Morais'
+            WHEN 31 THEN 'Estrada de Itapecerica'
+            WHEN 32 THEN 'Av. Ellis Maas'
+            WHEN 33 THEN 'Rua Comendador Antunes dos Santos'
+            WHEN 41 THEN 'Av. Cruzeiro do Sul'
+            WHEN 42 THEN 'Rua Voluntários da Pátria'
+            WHEN 43 THEN 'Rua Dr. César'
+            WHEN 51 THEN 'Rua Teodoro Sampaio'
+            WHEN 52 THEN 'Rua dos Pinheiros'
+            WHEN 53 THEN 'Rua Cardeal Arcoverde'
+            WHEN 61 THEN 'Av. Inajar de Souza'
+            WHEN 62 THEN 'Rua Parapuã'
+            ELSE         'Av. Deputado Cantídio Sampaio'
+        END;
+    END rua_hist;
+
+    -- -----------------------------------------------------------------
+    -- Historico: 8 ocorrencias por mes nos 5 meses anteriores ao atual.
+    -- Todas encerradas (resolvidas, quase todas avaliadas, e algumas
+    -- canceladas com motivo). Uma em cada tres estoura o prazo, para o
+    -- "% no prazo" do painel nao ficar artificialmente em 100%.
+    -- -----------------------------------------------------------------
+    PROCEDURE gerar_historico IS
+        v_oc     NUMBER;
+        v_cat    NUMBER;
+        v_bairro NUMBER;
+        v_autor  NUMBER;
+        v_risco  CHAR(1);
+        v_ab     DATE;
+        v_prazo  DATE;
+        v_res    DATE;
+        v_dias   NUMBER;
+        v_atraso BOOLEAN;
+        v_nota   NUMBER;
+        v_lat    NUMBER;
+        v_lon    NUMBER;
+        v_ap1    NUMBER;
+        v_ap2    NUMBER;
+    BEGIN
+        FOR k IN 1 .. 5 LOOP
+            FOR j IN 1 .. 8 LOOP
+                v_bairro := MOD(k * 3 + j, 6) + 1;
+                v_cat    := MOD(k + j * 3, 8) + 1;
+                v_autor  := MOD(k + j, 4) + 1;
+                v_risco  := CASE WHEN MOD(j, 3) = 0 THEN 'S' ELSE 'N' END;
+                v_ab     := ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -k)
+                            + MOD(j * 7 + k * 3, 24) + (8 + MOD(j * 5 + k, 10)) / 24;
+
+                SELECT nr_latitude  + (MOD(j * 37 + k * 11, 40) - 20) / 2500,
+                       nr_longitude + (MOD(j * 53 + k * 17, 40) - 20) / 2500
+                  INTO v_lat, v_lon
+                  FROM zl_bairro WHERE id_bairro = v_bairro;
+
+                v_oc := nova_em(v_autor, v_cat, v_bairro,
+                                titulo_hist(v_cat, 1 + MOD(j + k, 2)),
+                                descricao_hist(v_cat),
+                                rua_hist(v_bairro, 1 + MOD(j, 3)) || ', ' || (100 + MOD(j * k * 37, 1900)),
+                                ROUND(v_lat, 6), ROUND(v_lon, 6), v_risco,
+                                CASE WHEN v_cat = 3 THEN 'S' ELSE 'N' END, v_ab);
+
+                SELECT dt_prazo INTO v_prazo FROM zl_ocorrencia WHERE id_ocorrencia = v_oc;
+                v_atraso := MOD(j + k, 3) = 0;
+                v_dias   := CASE WHEN v_atraso THEN (v_prazo - v_ab) + 2 + MOD(j, 4)
+                                 ELSE GREATEST(1, CEIL((v_prazo - v_ab) * 0.6)) END;
+                v_res    := LEAST(v_ab + v_dias, TRUNC(SYSDATE) - 1 + 15 / 24);
+
+                -- Vizinhos confirmam no dia seguinte (antes de qualquer andamento).
+                IF MOD(j, 2) = 0 THEN
+                    v_ap1 := MOD(v_autor, 4) + 1;
+                    apoio_em(v_oc, v_ap1, v_ab + 0.3);
+                    IF MOD(j, 4) = 0 THEN
+                        v_ap2 := MOD(v_autor + 1, 4) + 1;
+                        apoio_em(v_oc, v_ap2, v_ab + 0.4);
+                    END IF;
+                END IF;
+
+                mover_em(v_oc, 'EM_ANALISE', 'Equipe de vistoria enviada ao local.',
+                         v_ab + (v_res - v_ab) / 3);
+
+                IF j = 8 AND MOD(k, 2) = 1 THEN
+                    mover_em(v_oc, 'CANCELADA',
+                             'Vistoria constatou que o serviço é da concessionária; o pedido foi '
+                             || 'encaminhado a ela com o número deste protocolo.',
+                             v_ab + (v_res - v_ab) / 2);
+                ELSE
+                    mover_em(v_oc, 'EM_ANDAMENTO', 'Serviço programado com a equipe responsável.',
+                             v_ab + 2 * (v_res - v_ab) / 3);
+                    mover_em(v_oc, 'RESOLVIDA', solucao_hist(v_cat), v_res);
+
+                    IF MOD(j, 4) <> 3 THEN
+                        v_nota := 5 - MOD(j * k, 3);
+                        IF v_atraso THEN
+                            v_nota := GREATEST(2, v_nota - 1);
+                        END IF;
+                        avaliacao(v_oc, v_nota,
+                                  CASE v_nota
+                                      WHEN 5 THEN 'Resolveram rápido, obrigado.'
+                                      WHEN 4 THEN 'Ficou bom, mas demorou um pouco.'
+                                      WHEN 3 THEN 'Resolveu, mas o acabamento ficou ruim.'
+                                      ELSE 'Demorou demais para atender.'
+                                  END);
+                    END IF;
+                END IF;
+            END LOOP;
+        END LOOP;
+    END gerar_historico;
 BEGIN
+    -- Historico antigo primeiro: os protocolos ficam em ordem de abertura.
+    gerar_historico;
+
     -- ===== Itaquera =====
     v_id := nova(1, 1, 1, 'Buraco grande na faixa de ônibus',
         'Buraco de quase um metro na faixa da direita, os ônibus desviam para a outra pista.',
@@ -230,6 +464,20 @@ BEGIN
         'Rua Parapuã, 800', -23.455200, -46.684900, 'S', 'N', 16);
     apoio(v_id, 1, 15); apoio(v_id, 4, 14); apoio(v_id, 3, 12);
 
+
+    -- ===== Conversa na linha do tempo (gera notificacoes de comentario) =====
+    -- Buraco da Ana na faixa de onibus: a prefeitura responde e um apoiador
+    -- complementa.
+    SELECT id_ocorrencia INTO v_id FROM zl_ocorrencia
+     WHERE ds_titulo = 'Buraco grande na faixa de ônibus';
+    comentario(v_id, c_gestor, 'Vistoria marcada para esta semana. A área já foi sinalizada com cones.', 5);
+    comentario(v_id, 4, 'Passei hoje cedo e os cones já estão lá, obrigado.', 4);
+
+    -- Rampa do posto de saude (Joaquim), que a Ana apoiou.
+    SELECT id_ocorrencia INTO v_id FROM zl_ocorrencia
+     WHERE ds_titulo = 'Calçada sem rampa na esquina do posto de saúde';
+    comentario(v_id, 2, 'Continuo sem conseguir atravessar com o andador. Alguma previsão da obra?', 3);
+
     -- Prioridade de todas as ocorrencias, ja com o tempo de espera.
     FOR r IN (SELECT id_ocorrencia FROM zl_ocorrencia) LOOP
         v_id := pkg_zl_ocorrencia.calcular_prioridade(r.id_ocorrencia);
@@ -244,15 +492,26 @@ BEGIN
            +  5 * (SELECT COUNT(*) FROM zl_ocorrencia o
                     WHERE o.id_usuario = u.id_usuario AND o.st_ocorrencia = 'RESOLVIDA');
 
+    -- Quem usa o app ja leu o que chegou ha mais de uma semana; o que e
+    -- da ultima semana aparece como novidade no sininho.
+    UPDATE zl_notificacao
+       SET fl_lida = 'S'
+     WHERE dt_criacao < TRUNC(SYSDATE) - 7;
+
     COMMIT;
 END;
 /
 
--- Indicadores do mes anterior ja consolidados (historico do painel).
+-- ---------------------------------------------------------------------
+-- Indicadores dos 5 meses anteriores ja consolidados (grafico mes a mes
+-- do painel). O mes atual fica para a rotina diaria / botao do gestor.
+-- ---------------------------------------------------------------------
 DECLARE
     v_qt NUMBER;
 BEGIN
-    pkg_zl_indicador.gerar_indicadores(TO_CHAR(ADD_MONTHS(SYSDATE, -1), 'YYYY-MM'), v_qt);
+    FOR k IN REVERSE 1 .. 5 LOOP
+        pkg_zl_indicador.gerar_indicadores(TO_CHAR(ADD_MONTHS(SYSDATE, -k), 'YYYY-MM'), v_qt);
+    END LOOP;
     COMMIT;
 END;
 /

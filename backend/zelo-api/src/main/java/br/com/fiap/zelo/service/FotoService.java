@@ -65,7 +65,22 @@ public class FotoService {
     }
 
     public String gravar(FotoValidada foto) {
-        String nome = UUID.randomUUID() + "." + foto.extensao();
+        return gravar(foto, nomeNovo(foto));
+    }
+
+    /**
+     * Nome aleatorio para a foto, sem gravar ainda. Permite registrar o nome
+     * no banco primeiro e so escrever o arquivo se o banco aceitar: recusa
+     * de regra nao deixa arquivo orfao no disco.
+     */
+    public String nomeNovo(FotoValidada foto) {
+        return UUID.randomUUID() + "." + foto.extensao();
+    }
+
+    public String gravar(FotoValidada foto, String nome) {
+        if (!NOME_VALIDO.matcher(nome).matches()) {
+            throw new IllegalArgumentException("Nome de foto inválido.");
+        }
         try {
             Files.write(pasta.resolve(nome), foto.bytes());
         } catch (IOException e) {

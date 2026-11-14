@@ -14,6 +14,14 @@ export function urlBase(): string {
   return Platform.OS === 'android' ? 'http://10.0.2.2:8080/api' : 'http://localhost:8080/api';
 }
 
+/** Endereco publico do app (links compartilhados). */
+export function urlWeb(): string {
+  const configurada = process.env.EXPO_PUBLIC_WEB_URL;
+  if (configurada) return configurada;
+  if (Platform.OS === 'web' && typeof window !== 'undefined') return window.location.origin;
+  return 'http://localhost:8082';
+}
+
 export function urlFoto(nome: string): string {
   return `${urlBase()}/fotos/${nome}`;
 }
@@ -54,7 +62,7 @@ export class ErroApi extends Error {
   }
 }
 
-type Metodo = 'GET' | 'POST' | 'PATCH';
+type Metodo = 'GET' | 'POST' | 'PATCH' | 'PUT';
 
 interface Opcoes {
   corpo?: unknown;
@@ -96,7 +104,7 @@ async function requisitar<T>(metodo: Metodo, caminho: string, opcoes: Opcoes = {
     if ((e as Error).name === 'AbortError') {
       throw new ErroApi(0, opcoes.sinal?.aborted ? 'cancelada' : 'O servidor demorou para responder.');
     }
-    throw new ErroApi(0, 'Sem conexao com o servidor do Zelo.');
+    throw new ErroApi(0, 'Sem conexão com o servidor do Zelo. Confira a internet e tente de novo.');
   } finally {
     clearTimeout(timer);
     opcoes.sinal?.removeEventListener('abort', repassar);
@@ -108,6 +116,7 @@ export const api = {
   post: <T>(caminho: string, corpo?: unknown, timeoutMs?: number) =>
     requisitar<T>('POST', caminho, { corpo: corpo ?? {}, timeoutMs }),
   patch: <T>(caminho: string, corpo: unknown) => requisitar<T>('PATCH', caminho, { corpo }),
+  put: <T>(caminho: string, corpo: unknown) => requisitar<T>('PUT', caminho, { corpo }),
 };
 
 /** Requisicao cancelada porque a tela fechou: nao e erro para mostrar. */

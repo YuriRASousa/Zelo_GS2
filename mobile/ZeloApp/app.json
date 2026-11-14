@@ -26,14 +26,23 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION"],
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      ["expo-location", { "locationWhenInUsePermission": "O Zelo usa a sua localizacao para marcar onde fica o problema." }]
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Zelo usa a sua localizacao para marcar onde fica o problema."
+        }
+      ],
+      "expo-font"
     ]
   }
 }

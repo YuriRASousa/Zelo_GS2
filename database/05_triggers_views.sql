@@ -11,10 +11,10 @@ AFTER INSERT ON zl_ocorrencia
 FOR EACH ROW
 BEGIN
     INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
-                              ds_comentario, id_usuario, dt_evento)
+                              ds_comentario, id_usuario, dt_evento, tp_evento)
     VALUES (seq_zl_historico.NEXTVAL, :NEW.id_ocorrencia, NULL, :NEW.st_ocorrencia,
             'Ocorrência registrada pelo cidadão. Protocolo ' || :NEW.cd_protocolo || '.',
-            :NEW.id_usuario, :NEW.dt_abertura);
+            :NEW.id_usuario, :NEW.dt_abertura, 'REGISTRO');
 END;
 /
 
@@ -22,7 +22,9 @@ END;
 -- Toda troca de status vira uma linha do historico, com o comentario e
 -- o gestor passados por pkg_zl_ocorrencia.atualizar_status. Se a troca
 -- vier de fora da API (UPDATE direto), a linha ainda e gravada, so que
--- sem autor: a auditoria nao depende de quem chamou.
+-- sem autor: a auditoria nao depende de quem chamou. As notificacoes
+-- ficam no pacote (pkg_zl_ocorrencia.trocar_status), nao aqui, para nao
+-- avisar o cidadao duas vezes nem disparar aviso em manutencao manual.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE TRIGGER trg_zl_ocorrencia_status_au
 AFTER UPDATE OF st_ocorrencia ON zl_ocorrencia
@@ -30,11 +32,11 @@ FOR EACH ROW
 WHEN (NEW.st_ocorrencia <> OLD.st_ocorrencia)
 BEGIN
     INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
-                              ds_comentario, id_usuario)
+                              ds_comentario, id_usuario, tp_evento)
     VALUES (seq_zl_historico.NEXTVAL, :NEW.id_ocorrencia, :OLD.st_ocorrencia,
             :NEW.st_ocorrencia,
             NVL(pkg_zl_ocorrencia.g_comentario, 'Status alterado.'),
-            pkg_zl_ocorrencia.g_usuario);
+            pkg_zl_ocorrencia.g_usuario, 'STATUS');
 END;
 /
 
@@ -75,6 +77,7 @@ SELECT o.id_ocorrencia,
        o.nr_latitude,
        o.nr_longitude,
        o.ds_foto,
+       o.ds_foto_solucao,
        o.fl_risco,
        o.fl_acessibilidade,
        o.st_ocorrencia,
@@ -101,7 +104,8 @@ SELECT o.id_bairro,
        c.id_categoria,
        c.nm_categoria,
        c.ds_icone,
-       COUNT(*) AS qt_total,
+       -- Canceladas ficam fora do total: nao sao problema atendido nem pendente.
+       SUM(CASE WHEN o.st_ocorrencia <> 'CANCELADA' THEN 1 ELSE 0 END) AS qt_total,
        SUM(CASE WHEN o.st_ocorrencia IN ('ABERTA', 'EM_ANALISE', 'EM_ANDAMENTO')
                 THEN 1 ELSE 0 END) AS qt_em_aberto,
        SUM(CASE WHEN o.st_ocorrencia = 'RESOLVIDA' THEN 1 ELSE 0 END) AS qt_resolvidas

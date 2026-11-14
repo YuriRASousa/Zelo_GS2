@@ -23,6 +23,12 @@ export function dataHora(iso: string): string {
   return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
 }
 
+/** "2026-11" vira "novembro de 2026". */
+export function mesPorExtenso(codigo: string): string {
+  const [ano, mes] = codigo.split('-').map(Number);
+  return `${MESES_LONGOS[mes - 1].toLowerCase()} de ${ano}`;
+}
+
 export function nomeMes(codigo: string): string {
   const [ano, mes] = codigo.split('-').map(Number);
   return `${MESES_LONGOS[mes - 1]} ${ano}`;
@@ -32,13 +38,15 @@ export function nomeMes(codigo: string): string {
 export function prazoRelativo(iso: string): { texto: string; vencido: boolean } {
   const prazo = ler(iso);
   const agora = new Date();
-  if (prazo.getTime() < agora.getTime()) {
-    const dias = Math.max(1, Math.ceil((agora.getTime() - prazo.getTime()) / 86400000));
-    return { texto: `venceu há ${dias} dia${dias === 1 ? '' : 's'}`, vencido: true };
-  }
-  // Diferenca em dias de calendario (meia-noite a meia-noite).
+  // Dias de calendario (meia-noite a meia-noite), nunca pela hora: prazo
+  // em 13 nov visto em 14 nov "venceu ha 1 dia".
   const meiaNoite = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const dias = Math.round((meiaNoite(prazo) - meiaNoite(agora)) / 86400000);
+  if (prazo.getTime() < agora.getTime()) {
+    const atraso = Math.max(0, -dias);
+    if (atraso === 0) return { texto: 'venceu hoje', vencido: true };
+    return { texto: `venceu há ${atraso} dia${atraso === 1 ? '' : 's'}`, vencido: true };
+  }
   if (dias === 0) return { texto: 'vence hoje', vencido: false };
   if (dias === 1) return { texto: 'vence amanhã', vencido: false };
   return { texto: `faltam ${dias} dias`, vencido: false };
@@ -46,4 +54,9 @@ export function prazoRelativo(iso: string): { texto: string; vencido: boolean } 
 
 export function pct(valor: number | null | undefined): string {
   return valor == null ? '–' : `${valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+}
+
+/** Protocolo com hifen inseparavel (U+2011): nao quebra no meio dentro de uma frase. */
+export function protocoloInteiro(protocolo: string): string {
+  return protocolo.replace(/-/g, '‑');
 }

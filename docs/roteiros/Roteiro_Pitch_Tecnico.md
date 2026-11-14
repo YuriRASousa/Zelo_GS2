@@ -9,7 +9,7 @@
    cd database
    python executar_scripts.py --recriar
    ```
-2. Suba a API e o app: `scripts\iniciar_api.bat` e `scripts\iniciar_app.bat`.
+2. Suba a API e o app: `scripts\iniciar_api.bat` e `scripts\iniciar_app.bat`. Se a API já estava aberta quando você recriou o banco, feche e abra de novo (as conexões antigas guardam a versão anterior dos pacotes PL/SQL).
 3. No Chrome, abra `http://localhost:8082`, aperte `F12`, ative o modo celular (`Ctrl + Shift + M`) e escolha um aparelho (ex.: iPhone 12 Pro). Feche o DevTools depois, o tamanho fica.
 4. Deixe abertos em abas: o Swagger (`http://localhost:8080/swagger-ui.html`), o VS Code com `database/03_pkg_ocorrencia.sql` e o arquivo `docs/modelo/DER_Zelo.png`.
 5. Gravador de tela: `Win + Alt + R` (Xbox Game Bar) ou OBS. Microfone ligado.
@@ -30,9 +30,9 @@ Tempo previsto: **4 min 45 s**.
 
 - Clique em **Cidadã (Ana)** e **Entrar**.
 - Toque em **+ Relatar**. Escolha **Calçada e acessibilidade**.
-- No mapa, toque perto do marcador da ocorrência ZL-2026-000004 (Itaquera, perto do posto de saúde).
+- No mapa, toque perto do pino de acessibilidade em Itaquera ("Calçada sem rampa na esquina do posto de saúde").
 
-> "Quando eu marco o local, o app consulta a function buscar_duplicada no banco. Existe uma ocorrência da mesma categoria a menos de 60 metros, então ele sugere apoiar a existente. Isso evita fila cheia de pedidos repetidos."
+> "Quando eu marco o local, o app consulta a function buscar_duplicada no banco. Existe uma ocorrência da mesma categoria a menos de 60 metros, então ele avisa que eu já acompanho esse problema e oferece abrir a existente ou dizer que é outro problema. Isso evita fila cheia de pedidos repetidos."
 
 - Troque a categoria para **Lixo e entulho** (o aviso some), escreva o título, ligue **Atrapalha quem tem deficiência**, escolha uma foto na **Galeria**.
 
@@ -54,7 +54,7 @@ Tempo previsto: **4 min 45 s**.
 
 ### 2:20 a 2:50 | Funcionalidade 3: acompanhar e acessibilidade
 
-- Aba **Minhas**: mostre "Relatei" e "Apoiei". Abra uma resolvida e mostre a avaliação e a linha do tempo.
+- Aba **Pedidos**: mostre "Relatei" e "Apoiei". Abra uma resolvida e mostre a avaliação e a linha do tempo.
 - Aba **Perfil**: ligue **Letras maiores** e volte ao mapa.
 
 > "O modo de letras maiores fica salvo na conta, pensado para idosos. Todos os botões têm rótulo para leitor de tela."

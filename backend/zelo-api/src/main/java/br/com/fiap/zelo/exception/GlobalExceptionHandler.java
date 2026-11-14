@@ -1,6 +1,7 @@
 package br.com.fiap.zelo.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.tomcat.util.http.InvalidParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -38,9 +39,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RegraNegocioException.class)
     public ResponseEntity<ErroResponse> regra(RegraNegocioException ex, HttpServletRequest req) {
         HttpStatus status = switch (ex.getCodigo()) {
-            case 20101, 20102, 20103, 20115 -> HttpStatus.NOT_FOUND;
-            case 20105, 20106, 20107, 20108, 20110, 20112, 20113, 20120 -> HttpStatus.CONFLICT;
-            case 20109, 20111 -> HttpStatus.FORBIDDEN;
+            case 20101, 20102, 20103, 20115, 20124 -> HttpStatus.NOT_FOUND;
+            case 20105, 20106, 20107, 20108, 20110, 20112, 20113, 20120, 20122 -> HttpStatus.CONFLICT;
+            case 20109, 20111, 20119, 20121 -> HttpStatus.FORBIDDEN;
+            // 20104, 20114, 20116, 20117 (motivo), 20118 (comentario), 20123 (foto
+            // da solucao fora de RESOLVIDA) e 20201 caem no 400 abaixo.
             case 20401 -> HttpStatus.UNAUTHORIZED;
             default -> HttpStatus.BAD_REQUEST;
         };
@@ -71,7 +74,9 @@ public class GlobalExceptionHandler {
         return montar(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido.", req, null);
     }
 
-    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class})
+    /** Inclui parametro de URL com codificacao invalida (o Tomcat rejeita a decodificacao). */
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class,
+            InvalidParameterException.class})
     public ResponseEntity<ErroResponse> parametro(Exception ex, HttpServletRequest req) {
         return montar(HttpStatus.BAD_REQUEST, "Parâmetro inválido ou ausente na requisição.", req, null);
     }

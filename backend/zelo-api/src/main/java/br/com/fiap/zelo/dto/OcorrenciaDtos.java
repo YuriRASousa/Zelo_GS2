@@ -28,7 +28,9 @@ public final class OcorrenciaDtos {
             boolean risco,
             boolean acessibilidade,
             /** JPEG ja reduzido pelo app, em base64 (sem o prefixo data:). Opcional. */
-            String fotoBase64) {
+            String fotoBase64,
+            /** true quando o cidadao viu o aviso de duplicata e confirmou que e outro problema. */
+            boolean ignorarDuplicada) {
     }
 
     public record CriadaResponse(long id, String protocolo) {
@@ -39,7 +41,19 @@ public final class OcorrenciaDtos {
 
     public record StatusRequest(
             @NotBlank(message = "Informe o novo status.") String status,
-            @Size(max = 500) String comentario) {
+            @Size(max = 500, message = "Comentário com até 500 letras.") String comentario,
+            /** Foto do servico pronto (JPG/PNG em base64). So aceita com status RESOLVIDA. */
+            String fotoSolucaoBase64) {
+    }
+
+    public record ComentarioRequest(
+            @NotBlank(message = "Escreva o comentário.")
+            @Size(min = 3, max = 500, message = "O comentário precisa ter de 3 a 500 letras.") String texto) {
+    }
+
+    public record CancelarRequest(
+            @NotBlank(message = "Conte o motivo do cancelamento.")
+            @Size(min = 5, max = 500, message = "O motivo precisa ter de 5 a 500 letras.") String motivo) {
     }
 
     public record AvaliacaoRequest(
@@ -58,8 +72,13 @@ public final class OcorrenciaDtos {
             boolean temFoto, LocalDateTime abertura, LocalDateTime prazo) {
     }
 
+    /**
+     * Linha do tempo. {@code tipo}: REGISTRO, STATUS, COMENTARIO ou ATRASO.
+     * {@code papelAutor}: CIDADAO, GESTOR ou nulo (evento do sistema).
+     */
     public record HistoricoResponse(
-            LocalDateTime data, String statusAnterior, String statusNovo, String comentario, String autor) {
+            LocalDateTime data, String statusAnterior, String statusNovo, String comentario, String autor,
+            String tipo, String papelAutor) {
     }
 
     public record OcorrenciaDetalhe(
@@ -72,6 +91,7 @@ public final class OcorrenciaDtos {
             LocalDateTime abertura, LocalDateTime prazo, LocalDateTime resolucao,
             String autor, boolean souAutor, boolean jaApoiei,
             Integer nota, String comentarioAvaliacao,
+            String fotoSolucao, boolean podeCancelar, boolean podeComentar,
             List<HistoricoResponse> historico) {
     }
 

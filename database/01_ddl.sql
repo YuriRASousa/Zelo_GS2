@@ -77,6 +77,7 @@ CREATE TABLE zl_ocorrencia (
     nr_latitude       NUMBER(9,6)    NOT NULL,
     nr_longitude      NUMBER(9,6)    NOT NULL,
     ds_foto           VARCHAR2(200),
+    ds_foto_solucao   VARCHAR2(200),
     fl_risco          CHAR(1)        DEFAULT 'N' NOT NULL,
     fl_acessibilidade CHAR(1)        DEFAULT 'N' NOT NULL,
     st_ocorrencia     VARCHAR2(15)   DEFAULT 'ABERTA' NOT NULL,
@@ -127,12 +128,36 @@ CREATE TABLE zl_historico (
     st_novo          VARCHAR2(15)  NOT NULL,
     ds_comentario    VARCHAR2(500),
     id_usuario       NUMBER(10),
+    tp_evento        VARCHAR2(12)  DEFAULT 'STATUS' NOT NULL,
     dt_evento        DATE          DEFAULT SYSDATE NOT NULL,
     CONSTRAINT pk_zl_historico PRIMARY KEY (id_historico),
+    CONSTRAINT ck_zl_historico_tipo CHECK (tp_evento IN ('REGISTRO', 'STATUS', 'COMENTARIO', 'ATRASO')),
     CONSTRAINT fk_zl_historico_ocorrencia FOREIGN KEY (id_ocorrencia)
         REFERENCES zl_ocorrencia (id_ocorrencia) ON DELETE CASCADE,
     CONSTRAINT fk_zl_historico_usuario FOREIGN KEY (id_usuario)
         REFERENCES zl_usuario (id_usuario)
+);
+
+-- ---------------------------------------------------------------------
+-- Notificacoes dentro do app: troca de status, atraso, apoio novo e
+-- comentario. Geradas pelo PKG_ZL_NOTIFICACAO, nunca pela API.
+-- ---------------------------------------------------------------------
+CREATE TABLE zl_notificacao (
+    id_notificacao   NUMBER(12)    NOT NULL,
+    id_usuario       NUMBER(10)    NOT NULL,
+    id_ocorrencia    NUMBER(10)    NOT NULL,
+    tp_notificacao   VARCHAR2(12)  NOT NULL,
+    ds_titulo        VARCHAR2(100) NOT NULL,
+    ds_mensagem      VARCHAR2(500) NOT NULL,
+    fl_lida          CHAR(1)       DEFAULT 'N' NOT NULL,
+    dt_criacao       DATE          DEFAULT SYSDATE NOT NULL,
+    CONSTRAINT pk_zl_notificacao PRIMARY KEY (id_notificacao),
+    CONSTRAINT ck_zl_notificacao_tipo CHECK (tp_notificacao IN ('STATUS', 'ATRASO', 'APOIO', 'COMENTARIO')),
+    CONSTRAINT ck_zl_notificacao_lida CHECK (fl_lida IN ('S', 'N')),
+    CONSTRAINT fk_zl_notificacao_usuario FOREIGN KEY (id_usuario)
+        REFERENCES zl_usuario (id_usuario) ON DELETE CASCADE,
+    CONSTRAINT fk_zl_notificacao_ocorrencia FOREIGN KEY (id_ocorrencia)
+        REFERENCES zl_ocorrencia (id_ocorrencia) ON DELETE CASCADE
 );
 
 -- ---------------------------------------------------------------------
@@ -192,10 +217,12 @@ CREATE SEQUENCE seq_zl_usuario    START WITH 1 INCREMENT BY 1 NOCACHE;
 CREATE SEQUENCE seq_zl_ocorrencia START WITH 1 INCREMENT BY 1 NOCACHE;
 CREATE SEQUENCE seq_zl_historico  START WITH 1 INCREMENT BY 1 NOCACHE;
 CREATE SEQUENCE seq_zl_log        START WITH 1 INCREMENT BY 1 NOCACHE;
+CREATE SEQUENCE seq_zl_notificacao START WITH 1 INCREMENT BY 1 NOCACHE;
 
 -- ---------------------------------------------------------------------
 -- Indices para as consultas que o app faz o tempo todo: mapa por bairro
--- e status, fila do gestor por prioridade e "minhas ocorrencias".
+-- e status, fila do gestor por prioridade, "minhas ocorrencias" e
+-- notificacoes.
 -- ---------------------------------------------------------------------
 CREATE INDEX ix_zl_ocorr_bairro_status ON zl_ocorrencia (id_bairro, st_ocorrencia);
 CREATE INDEX ix_zl_ocorr_prioridade    ON zl_ocorrencia (st_ocorrencia, nr_prioridade DESC);
@@ -204,3 +231,6 @@ CREATE INDEX ix_zl_ocorr_categoria     ON zl_ocorrencia (id_categoria);
 CREATE INDEX ix_zl_apoio_usuario       ON zl_apoio (id_usuario);
 CREATE INDEX ix_zl_historico_ocorr     ON zl_historico (id_ocorrencia, dt_evento);
 CREATE INDEX ix_zl_usuario_bairro      ON zl_usuario (id_bairro);
+-- Sininho do app: "nao lidas do usuario, mais novas primeiro".
+CREATE INDEX ix_zl_notif_usuario       ON zl_notificacao (id_usuario, fl_lida, dt_criacao DESC);
+CREATE INDEX ix_zl_notif_ocorrencia    ON zl_notificacao (id_ocorrencia);

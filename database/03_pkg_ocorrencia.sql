@@ -1,7 +1,8 @@
 -- =====================================================================
 -- ZELO | 03_pkg_ocorrencia.sql
 -- Regras do ciclo de vida da ocorrencia: registro, apoio da vizinhanca,
--- mudanca de status pelo gestor e avaliacao do cidadao.
+-- mudanca de status pelo gestor, comentarios, cancelamento pelo autor,
+-- avaliacao do cidadao e as notificacoes que cada evento gera.
 --
 -- Erros de aplicacao (o backend transforma em status HTTP):
 --   -20101 usuario inexistente          -20109 usuario nao e gestor
@@ -12,13 +13,239 @@
 --   -20106 apoio na propria ocorrencia  -20114 nota fora de 1 a 5
 --   -20107 ocorrencia encerrada         -20115 ocorrencia inexistente
 --   -20108 apoio repetido               -20116 coordenada fora do limite
+--   -20117 cancelamento sem motivo (minimo 5 letras)
+--   -20118 comentario fora de 3 a 500 letras
+--   -20119 sem permissao para comentar (nao e autor, apoiador nem gestor)
+--   -20121 so o autor pode cancelar a propria ocorrencia
+--   -20122 autor so cancela enquanto a ocorrencia esta ABERTA
+--   -20123 foto da solucao fora do status RESOLVIDA
+--   -20124 notificacao inexistente (ou de outro usuario)
 -- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- PKG_ZL_NOTIFICACAO: quem fica sabendo de cada evento.
+--   troca de status -> autor e apoiadores (menos quem fez a troca)
+--   atraso          -> autor
+--   apoio novo      -> autor
+--   comentario      -> autor e apoiadores, menos quem comentou
+-- Vem antes do PKG_ZL_OCORRENCIA porque ele chama estas rotinas.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE PACKAGE pkg_zl_notificacao AS
+
+    -- Rotulo do status do jeito que o cidadao le ("Em análise").
+    FUNCTION rotulo_status(p_status VARCHAR2) RETURN VARCHAR2 DETERMINISTIC;
+
+    -- Grava uma notificacao. Tipo fora da lista e recusado pelo CHECK.
+    PROCEDURE criar(p_id_usuario    IN NUMBER,
+                    p_id_ocorrencia IN NUMBER,
+                    p_tipo          IN VARCHAR2,
+                    p_titulo        IN VARCHAR2,
+                    p_mensagem      IN VARCHAR2);
+
+    PROCEDURE status_alterado(p_id_ocorrencia IN NUMBER,
+                              p_novo_status   IN VARCHAR2,
+                              p_comentario    IN VARCHAR2,
+                              p_quem_alterou  IN NUMBER);
+
+    PROCEDURE atraso(p_id_ocorrencia IN NUMBER);
+
+    PROCEDURE apoio_recebido(p_id_ocorrencia IN NUMBER, p_id_apoiador IN NUMBER);
+
+    PROCEDURE comentario_novo(p_id_ocorrencia IN NUMBER, p_id_autor_comentario IN NUMBER,
+                              p_texto IN VARCHAR2);
+
+    -- Marca uma notificacao do proprio usuario como lida (-20124 se nao for dele).
+    PROCEDURE marcar_lida(p_id_notificacao IN NUMBER, p_id_usuario IN NUMBER);
+
+    PROCEDURE marcar_todas(p_id_usuario IN NUMBER, o_qt OUT NUMBER);
+
+    FUNCTION nao_lidas(p_id_usuario NUMBER) RETURN NUMBER;
+
+END pkg_zl_notificacao;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_zl_notificacao AS
+
+    -- -----------------------------------------------------------------
+    FUNCTION rotulo_status(p_status VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS
+    BEGIN
+        RETURN CASE p_status
+                   WHEN 'ABERTA'       THEN 'Aberta'
+                   WHEN 'EM_ANALISE'   THEN 'Em análise'
+                   WHEN 'EM_ANDAMENTO' THEN 'Em andamento'
+                   WHEN 'RESOLVIDA'    THEN 'Resolvida'
+                   WHEN 'CANCELADA'    THEN 'Cancelada'
+                   ELSE p_status
+               END;
+    END rotulo_status;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE criar(p_id_usuario    IN NUMBER,
+                    p_id_ocorrencia IN NUMBER,
+                    p_tipo          IN VARCHAR2,
+                    p_titulo        IN VARCHAR2,
+                    p_mensagem      IN VARCHAR2)
+    IS
+    BEGIN
+        INSERT INTO zl_notificacao (id_notificacao, id_usuario, id_ocorrencia, tp_notificacao,
+                                    ds_titulo, ds_mensagem)
+        VALUES (seq_zl_notificacao.NEXTVAL, p_id_usuario, p_id_ocorrencia, p_tipo,
+                SUBSTR(p_titulo, 1, 100), SUBSTR(p_mensagem, 1, 500));
+    END criar;
+
+    -- -----------------------------------------------------------------
+    -- O autor recebe "sua ocorrencia"; quem apoiou recebe "a ocorrencia
+    -- que voce apoiou". Quem fez a troca (o gestor, ou o autor quando ele
+    -- mesmo cancela) nao recebe aviso do proprio gesto.
+    -- -----------------------------------------------------------------
+    PROCEDURE status_alterado(p_id_ocorrencia IN NUMBER,
+                              p_novo_status   IN VARCHAR2,
+                              p_comentario    IN VARCHAR2,
+                              p_quem_alterou  IN NUMBER)
+    IS
+        v_autor     zl_ocorrencia.id_usuario%TYPE;
+        v_protocolo zl_ocorrencia.cd_protocolo%TYPE;
+        v_titulo    VARCHAR2(100);
+        v_detalhe   VARCHAR2(400);
+    BEGIN
+        SELECT id_usuario, cd_protocolo INTO v_autor, v_protocolo
+          FROM zl_ocorrencia WHERE id_ocorrencia = p_id_ocorrencia;
+
+        v_titulo := CASE p_novo_status
+                        WHEN 'EM_ANALISE'   THEN 'Ocorrência em análise'
+                        WHEN 'EM_ANDAMENTO' THEN 'Atendimento em andamento'
+                        WHEN 'RESOLVIDA'    THEN 'Problema resolvido'
+                        WHEN 'CANCELADA'    THEN 'Ocorrência cancelada'
+                        ELSE 'Status atualizado'
+                    END;
+        v_detalhe := CASE WHEN TRIM(p_comentario) IS NOT NULL
+                          THEN ' Comentário: ' || SUBSTR(TRIM(p_comentario), 1, 300) END;
+
+        IF v_autor <> NVL(p_quem_alterou, -1) THEN
+            criar(v_autor, p_id_ocorrencia, 'STATUS', v_titulo,
+                  'Sua ocorrência ' || v_protocolo || ' mudou para "'
+                  || rotulo_status(p_novo_status) || '".' || v_detalhe
+                  || CASE WHEN p_novo_status = 'RESOLVIDA'
+                          THEN ' Conte como ficou: avalie o atendimento.' END);
+        END IF;
+
+        FOR a IN (SELECT id_usuario FROM zl_apoio
+                   WHERE id_ocorrencia = p_id_ocorrencia
+                     AND id_usuario <> NVL(p_quem_alterou, -1)) LOOP
+            criar(a.id_usuario, p_id_ocorrencia, 'STATUS', v_titulo,
+                  'A ocorrência ' || v_protocolo || ', que você apoiou, mudou para "'
+                  || rotulo_status(p_novo_status) || '".' || v_detalhe);
+        END LOOP;
+    END status_alterado;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE atraso(p_id_ocorrencia IN NUMBER) IS
+    BEGIN
+        INSERT INTO zl_notificacao (id_notificacao, id_usuario, id_ocorrencia, tp_notificacao,
+                                    ds_titulo, ds_mensagem)
+        SELECT seq_zl_notificacao.NEXTVAL, o.id_usuario, o.id_ocorrencia, 'ATRASO',
+               'Prazo de atendimento vencido',
+               'O prazo da sua ocorrência ' || o.cd_protocolo || ' venceu em '
+               || TO_CHAR(o.dt_prazo, 'fmDD "de" month', 'NLS_DATE_LANGUAGE=PORTUGUESE')
+               || '. A prioridade dela subiu automaticamente na fila da prefeitura.'
+          FROM zl_ocorrencia o
+         WHERE o.id_ocorrencia = p_id_ocorrencia;
+    END atraso;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE apoio_recebido(p_id_ocorrencia IN NUMBER, p_id_apoiador IN NUMBER) IS
+    BEGIN
+        INSERT INTO zl_notificacao (id_notificacao, id_usuario, id_ocorrencia, tp_notificacao,
+                                    ds_titulo, ds_mensagem)
+        SELECT seq_zl_notificacao.NEXTVAL, o.id_usuario, o.id_ocorrencia, 'APOIO',
+               'Novo apoio na sua ocorrência',
+               'Um vizinho também viu o problema da ocorrência ' || o.cd_protocolo
+               || CASE WHEN o.qt_apoios = 1 THEN '. É o primeiro apoio'
+                       ELSE '. Agora são ' || o.qt_apoios || ' apoios' END
+               || ', e ela sobe na fila de atendimento da prefeitura.'
+          FROM zl_ocorrencia o
+         WHERE o.id_ocorrencia = p_id_ocorrencia
+           AND o.id_usuario <> p_id_apoiador;
+    END apoio_recebido;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE comentario_novo(p_id_ocorrencia IN NUMBER, p_id_autor_comentario IN NUMBER,
+                              p_texto IN VARCHAR2)
+    IS
+        v_nome      zl_usuario.nm_usuario%TYPE;
+        v_papel     zl_usuario.tp_papel%TYPE;
+        v_protocolo zl_ocorrencia.cd_protocolo%TYPE;
+        v_quem      VARCHAR2(120);
+        v_trecho    VARCHAR2(200);
+    BEGIN
+        SELECT nm_usuario, tp_papel INTO v_nome, v_papel
+          FROM zl_usuario WHERE id_usuario = p_id_autor_comentario;
+        SELECT cd_protocolo INTO v_protocolo
+          FROM zl_ocorrencia WHERE id_ocorrencia = p_id_ocorrencia;
+
+        -- Cidadao aparece so pelo primeiro nome (o app e publico).
+        v_quem := CASE WHEN v_papel = 'GESTOR' THEN 'A prefeitura'
+                       ELSE REGEXP_SUBSTR(TRIM(v_nome), '^\S+') END;
+        v_trecho := SUBSTR(TRIM(p_texto), 1, 150)
+                    || CASE WHEN LENGTH(TRIM(p_texto)) > 150 THEN '...' END;
+
+        FOR d IN (SELECT id_usuario FROM zl_ocorrencia WHERE id_ocorrencia = p_id_ocorrencia
+                  UNION
+                  SELECT id_usuario FROM zl_apoio WHERE id_ocorrencia = p_id_ocorrencia) LOOP
+            IF d.id_usuario <> p_id_autor_comentario THEN
+                criar(d.id_usuario, p_id_ocorrencia, 'COMENTARIO',
+                      'Novo comentário',
+                      v_quem || ' comentou: "' || v_trecho || '"');
+            END IF;
+        END LOOP;
+    END comentario_novo;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE marcar_lida(p_id_notificacao IN NUMBER, p_id_usuario IN NUMBER) IS
+    BEGIN
+        -- O filtro pelo dono impede marcar (ou descobrir) a notificacao
+        -- de outra pessoa: para quem nao e dono, ela "nao existe".
+        UPDATE zl_notificacao
+           SET fl_lida = 'S'
+         WHERE id_notificacao = p_id_notificacao
+           AND id_usuario = p_id_usuario;
+        IF SQL%ROWCOUNT = 0 THEN
+            RAISE_APPLICATION_ERROR(-20124, 'Notificação não encontrada.');
+        END IF;
+    END marcar_lida;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE marcar_todas(p_id_usuario IN NUMBER, o_qt OUT NUMBER) IS
+    BEGIN
+        UPDATE zl_notificacao
+           SET fl_lida = 'S'
+         WHERE id_usuario = p_id_usuario
+           AND fl_lida = 'N';
+        o_qt := SQL%ROWCOUNT;
+    END marcar_todas;
+
+    -- -----------------------------------------------------------------
+    FUNCTION nao_lidas(p_id_usuario NUMBER) RETURN NUMBER IS
+        v_qt NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_qt FROM zl_notificacao
+         WHERE id_usuario = p_id_usuario AND fl_lida = 'N';
+        RETURN v_qt;
+    END nao_lidas;
+
+END pkg_zl_notificacao;
+/
 
 CREATE OR REPLACE PACKAGE pkg_zl_ocorrencia AS
 
     -- Raio (metros) em que duas ocorrencias da mesma categoria sao
     -- consideradas o mesmo problema.
     c_raio_duplicada CONSTANT NUMBER := 60;
+
+    -- Limites de texto livre.
+    c_min_motivo     CONSTANT NUMBER := 5;
+    c_min_comentario CONSTANT NUMBER := 3;
+    c_max_comentario CONSTANT NUMBER := 500;
 
     -- Contexto da mudanca de status, lido pelo trigger de historico.
     -- Fica preenchido so durante o UPDATE feito por atualizar_status.
@@ -59,16 +286,33 @@ CREATE OR REPLACE PACKAGE pkg_zl_ocorrencia AS
         p_risco          IN  CHAR,
         p_acessibilidade IN  CHAR,
         o_id_ocorrencia  OUT NUMBER,
-        o_protocolo      OUT VARCHAR2);
+        o_protocolo      OUT VARCHAR2,
+        p_ignorar_duplicada IN CHAR DEFAULT 'N');
 
     PROCEDURE apoiar(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
                      o_qt_apoios OUT NUMBER, o_prioridade OUT NUMBER);
 
+    -- p_foto_solucao: nome do arquivo da foto do servico pronto; so e
+    -- aceita quando o novo status e RESOLVIDA. CANCELADA exige motivo.
     PROCEDURE atualizar_status(p_id_ocorrencia IN NUMBER, p_id_gestor IN NUMBER,
-                               p_novo_status IN VARCHAR2, p_comentario IN VARCHAR2);
+                               p_novo_status IN VARCHAR2, p_comentario IN VARCHAR2,
+                               p_foto_solucao IN VARCHAR2 DEFAULT NULL);
 
     PROCEDURE avaliar(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
                       p_nota IN NUMBER, p_comentario IN VARCHAR2);
+
+    -- Comentario na linha do tempo: autor, quem apoiou ou gestor, so com
+    -- a ocorrencia ainda em aberto. Avisa autor e apoiadores.
+    PROCEDURE comentar(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
+                       p_texto IN VARCHAR2);
+
+    -- O proprio autor desiste do pedido enquanto ninguem da prefeitura
+    -- comecou a analisar (status ABERTA). Motivo obrigatorio.
+    PROCEDURE cancelar_pelo_autor(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
+                                  p_motivo IN VARCHAR2);
+
+    -- Maiusculas e sem acento, para a busca "calcada" achar "Calçada".
+    FUNCTION normalizar(p_texto VARCHAR2) RETURN VARCHAR2 DETERMINISTIC;
 
 END pkg_zl_ocorrencia;
 /
@@ -214,7 +458,8 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
         p_risco          IN  CHAR,
         p_acessibilidade IN  CHAR,
         o_id_ocorrencia  OUT NUMBER,
-        o_protocolo      OUT VARCHAR2)
+        o_protocolo      OUT VARCHAR2,
+        p_ignorar_duplicada IN CHAR DEFAULT 'N')
     IS
         v_qt        NUMBER;
         v_duplicada NUMBER;
@@ -248,7 +493,8 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
 
         -- Evita a fila do gestor encher de registros do mesmo buraco.
         v_duplicada := buscar_duplicada(p_id_categoria, p_lat, p_lon);
-        IF v_duplicada IS NOT NULL THEN
+        -- 'S' quando o cidadao viu o aviso e confirmou que e outro problema.
+        IF v_duplicada IS NOT NULL AND NVL(p_ignorar_duplicada, 'N') <> 'S' THEN
             SELECT cd_protocolo INTO v_protocolo_dup
               FROM zl_ocorrencia WHERE id_ocorrencia = v_duplicada;
             RAISE_APPLICATION_ERROR(-20105,
@@ -279,7 +525,7 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
 
         somar_pontos(p_id_usuario, 10);
 
-        pkg_zl_log.registrar('REGISTRAR', 'Ocorrencia ' || o_protocolo || ' aberta.', 1);
+        pkg_zl_log.registrar('REGISTRAR', 'Ocorrência ' || o_protocolo || ' aberta.', 1);
     END registrar;
 
     -- -----------------------------------------------------------------
@@ -327,17 +573,57 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
          WHERE id_ocorrencia = p_id_ocorrencia;
 
         somar_pontos(p_id_usuario, 2);
+
+        -- Autor fica sabendo que a vizinhanca confirmou o problema.
+        pkg_zl_notificacao.apoio_recebido(p_id_ocorrencia, p_id_usuario);
     END apoiar;
 
     -- -----------------------------------------------------------------
+    -- Passo comum a gestor e autor: grava o novo status (o trigger escreve
+    -- a linha do tempo com o contexto abaixo), recalcula a prioridade e
+    -- avisa autor e apoiadores. As notificacoes saem daqui, e nao do
+    -- trigger, para um UPDATE manual de manutencao nao disparar avisos.
+    -- -----------------------------------------------------------------
+    PROCEDURE trocar_status(p_id_ocorrencia IN NUMBER, p_novo IN VARCHAR2,
+                            p_comentario IN VARCHAR2, p_id_usuario IN NUMBER,
+                            p_foto_solucao IN VARCHAR2)
+    IS
+        v_prioridade NUMBER;
+    BEGIN
+        g_comentario := SUBSTR(TRIM(p_comentario), 1, 500);
+        g_usuario    := p_id_usuario;
+
+        UPDATE zl_ocorrencia
+           SET st_ocorrencia   = p_novo,
+               dt_resolucao    = CASE WHEN p_novo = 'RESOLVIDA' THEN SYSDATE END,
+               ds_foto_solucao = CASE WHEN p_novo = 'RESOLVIDA' THEN p_foto_solucao END
+         WHERE id_ocorrencia = p_id_ocorrencia;
+
+        g_comentario := NULL;
+        g_usuario    := NULL;
+
+        v_prioridade := calcular_prioridade(p_id_ocorrencia);
+        UPDATE zl_ocorrencia
+           SET nr_prioridade = v_prioridade
+         WHERE id_ocorrencia = p_id_ocorrencia;
+
+        pkg_zl_notificacao.status_alterado(p_id_ocorrencia, p_novo, p_comentario, p_id_usuario);
+    EXCEPTION
+        WHEN OTHERS THEN
+            g_comentario := NULL;
+            g_usuario    := NULL;
+            RAISE;
+    END trocar_status;
+
+    -- -----------------------------------------------------------------
     PROCEDURE atualizar_status(p_id_ocorrencia IN NUMBER, p_id_gestor IN NUMBER,
-                               p_novo_status IN VARCHAR2, p_comentario IN VARCHAR2)
+                               p_novo_status IN VARCHAR2, p_comentario IN VARCHAR2,
+                               p_foto_solucao IN VARCHAR2 DEFAULT NULL)
     IS
         v_papel  zl_usuario.tp_papel%TYPE;
         v_atual  zl_ocorrencia.st_ocorrencia%TYPE;
         v_autor  zl_ocorrencia.id_usuario%TYPE;
         v_novo   VARCHAR2(15) := UPPER(TRIM(p_novo_status));
-        v_prioridade NUMBER;
     BEGIN
         BEGIN
             SELECT tp_papel INTO v_papel FROM zl_usuario WHERE id_usuario = p_id_gestor;
@@ -360,35 +646,28 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
 
         IF NOT transicao_valida(v_atual, v_novo) THEN
             RAISE_APPLICATION_ERROR(-20110,
-                'Não é possível passar de ' || v_atual || ' para ' || v_novo || '.');
+                'Não é possível passar de "' || pkg_zl_notificacao.rotulo_status(v_atual)
+                || '" para "' || NVL(pkg_zl_notificacao.rotulo_status(v_novo), '?') || '".');
         END IF;
 
-        -- Contexto para o trigger que escreve a linha do tempo.
-        g_comentario := SUBSTR(p_comentario, 1, 500);
-        g_usuario    := p_id_gestor;
+        -- Cancelar sem explicar deixa o cidadao sem resposta: o motivo
+        -- aparece na linha do tempo e na notificacao.
+        IF v_novo = 'CANCELADA' AND NVL(LENGTH(TRIM(p_comentario)), 0) < c_min_motivo THEN
+            RAISE_APPLICATION_ERROR(-20117,
+                'Para cancelar, explique o motivo com pelo menos ' || c_min_motivo || ' letras.');
+        END IF;
 
-        UPDATE zl_ocorrencia
-           SET st_ocorrencia = v_novo,
-               dt_resolucao  = CASE WHEN v_novo = 'RESOLVIDA' THEN SYSDATE END
-         WHERE id_ocorrencia = p_id_ocorrencia;
+        IF TRIM(p_foto_solucao) IS NOT NULL AND v_novo <> 'RESOLVIDA' THEN
+            RAISE_APPLICATION_ERROR(-20123,
+                'A foto da solução só pode ser enviada ao marcar a ocorrência como resolvida.');
+        END IF;
 
-        g_comentario := NULL;
-        g_usuario    := NULL;
-
-        v_prioridade := calcular_prioridade(p_id_ocorrencia);
-        UPDATE zl_ocorrencia
-           SET nr_prioridade = v_prioridade
-         WHERE id_ocorrencia = p_id_ocorrencia;
+        trocar_status(p_id_ocorrencia, v_novo, p_comentario, p_id_gestor, TRIM(p_foto_solucao));
 
         -- Quem relatou um problema que foi resolvido ganha pontos extras.
         IF v_novo = 'RESOLVIDA' THEN
             somar_pontos(v_autor, 5);
         END IF;
-    EXCEPTION
-        WHEN OTHERS THEN
-            g_comentario := NULL;
-            g_usuario    := NULL;
-            RAISE;
     END atualizar_status;
 
     -- -----------------------------------------------------------------
@@ -424,6 +703,117 @@ CREATE OR REPLACE PACKAGE BODY pkg_zl_ocorrencia AS
                 RAISE_APPLICATION_ERROR(-20113, 'Este atendimento já foi avaliado.');
         END;
     END avaliar;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE comentar(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
+                       p_texto IN VARCHAR2)
+    IS
+        v_papel   zl_usuario.tp_papel%TYPE;
+        v_autor   zl_ocorrencia.id_usuario%TYPE;
+        v_status  zl_ocorrencia.st_ocorrencia%TYPE;
+        v_apoiou  NUMBER;
+        v_texto   VARCHAR2(32767) := TRIM(p_texto);
+    BEGIN
+        BEGIN
+            SELECT tp_papel INTO v_papel FROM zl_usuario WHERE id_usuario = p_id_usuario;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20101, 'Usuário ' || p_id_usuario || ' não encontrado.');
+        END;
+
+        BEGIN
+            SELECT id_usuario, st_ocorrencia INTO v_autor, v_status
+              FROM zl_ocorrencia WHERE id_ocorrencia = p_id_ocorrencia;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20115, 'Ocorrência ' || p_id_ocorrencia || ' não encontrada.');
+        END;
+
+        SELECT COUNT(*) INTO v_apoiou FROM zl_apoio
+         WHERE id_ocorrencia = p_id_ocorrencia AND id_usuario = p_id_usuario;
+
+        -- Conversa fica entre quem tem relacao com o problema e a
+        -- prefeitura; evita a linha do tempo virar mural aberto.
+        IF v_papel <> 'GESTOR' AND v_autor <> p_id_usuario AND v_apoiou = 0 THEN
+            RAISE_APPLICATION_ERROR(-20119,
+                'Só quem registrou, quem apoiou ou a prefeitura pode comentar nesta ocorrência. '
+                || 'Apoie o problema para participar da conversa.');
+        END IF;
+
+        IF v_status IN ('RESOLVIDA', 'CANCELADA') THEN
+            RAISE_APPLICATION_ERROR(-20107, 'Esta ocorrência já foi encerrada e não recebe mais comentários.');
+        END IF;
+
+        IF NVL(LENGTH(v_texto), 0) < c_min_comentario OR LENGTH(v_texto) > c_max_comentario THEN
+            RAISE_APPLICATION_ERROR(-20118,
+                'O comentário precisa ter de ' || c_min_comentario || ' a ' || c_max_comentario || ' letras.');
+        END IF;
+
+        INSERT INTO zl_historico (id_historico, id_ocorrencia, st_anterior, st_novo,
+                                  ds_comentario, id_usuario, tp_evento)
+        VALUES (seq_zl_historico.NEXTVAL, p_id_ocorrencia, v_status, v_status,
+                v_texto, p_id_usuario, 'COMENTARIO');
+
+        pkg_zl_notificacao.comentario_novo(p_id_ocorrencia, p_id_usuario, v_texto);
+    END comentar;
+
+    -- -----------------------------------------------------------------
+    PROCEDURE cancelar_pelo_autor(p_id_ocorrencia IN NUMBER, p_id_usuario IN NUMBER,
+                                  p_motivo IN VARCHAR2)
+    IS
+        v_autor  zl_ocorrencia.id_usuario%TYPE;
+        v_status zl_ocorrencia.st_ocorrencia%TYPE;
+        v_prot   zl_ocorrencia.cd_protocolo%TYPE;
+    BEGIN
+        IF NOT usuario_existe(p_id_usuario) THEN
+            RAISE_APPLICATION_ERROR(-20101, 'Usuário ' || p_id_usuario || ' não encontrado.');
+        END IF;
+
+        BEGIN
+            SELECT id_usuario, st_ocorrencia, cd_protocolo INTO v_autor, v_status, v_prot
+              FROM zl_ocorrencia WHERE id_ocorrencia = p_id_ocorrencia
+               FOR UPDATE;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20115, 'Ocorrência ' || p_id_ocorrencia || ' não encontrada.');
+        END;
+
+        IF v_autor <> p_id_usuario THEN
+            RAISE_APPLICATION_ERROR(-20121, 'Somente quem registrou pode cancelar a ocorrência.');
+        END IF;
+
+        IF v_status <> 'ABERTA' THEN
+            RAISE_APPLICATION_ERROR(-20122,
+                'A prefeitura já começou a cuidar desta ocorrência ("'
+                || pkg_zl_notificacao.rotulo_status(v_status)
+                || '"), então ela não pode mais ser cancelada pelo aplicativo.');
+        END IF;
+
+        IF NVL(LENGTH(TRIM(p_motivo)), 0) < c_min_motivo THEN
+            RAISE_APPLICATION_ERROR(-20117,
+                'Conte o motivo do cancelamento com pelo menos ' || c_min_motivo || ' letras.');
+        END IF;
+
+        trocar_status(p_id_ocorrencia, 'CANCELADA',
+                      'Cancelada por quem registrou. Motivo: ' || TRIM(p_motivo),
+                      p_id_usuario, NULL);
+
+        -- Devolve os pontos do registro: registrar e cancelar em seguida
+        -- nao pode virar atalho para subir no ranking.
+        UPDATE zl_usuario
+           SET nr_pontos = GREATEST(nr_pontos - 10, 0)
+         WHERE id_usuario = p_id_usuario;
+
+        pkg_zl_log.registrar('CANCELAR_PELO_AUTOR', 'Ocorrência ' || v_prot || ' cancelada por quem relatou.', 1);
+    END cancelar_pelo_autor;
+
+    -- -----------------------------------------------------------------
+    FUNCTION normalizar(p_texto VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS
+    BEGIN
+        RETURN UPPER(TRANSLATE(p_texto,
+            'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ',
+            'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn'));
+    END normalizar;
 
 END pkg_zl_ocorrencia;
 /

@@ -2,6 +2,8 @@ package br.com.fiap.zelo.controller;
 
 import br.com.fiap.zelo.dto.OcorrenciaDtos.ApoioResponse;
 import br.com.fiap.zelo.dto.OcorrenciaDtos.AvaliacaoRequest;
+import br.com.fiap.zelo.dto.OcorrenciaDtos.CancelarRequest;
+import br.com.fiap.zelo.dto.OcorrenciaDtos.ComentarioRequest;
 import br.com.fiap.zelo.dto.OcorrenciaDtos.CriadaResponse;
 import br.com.fiap.zelo.dto.OcorrenciaDtos.DuplicadaResponse;
 import br.com.fiap.zelo.dto.OcorrenciaDtos.NovaOcorrenciaRequest;
@@ -36,12 +38,16 @@ public class OcorrenciaController {
         this.service = service;
     }
 
-    @Operation(summary = "Ocorrencias para o mapa, da maior prioridade para a menor")
+    @Operation(summary = "Ocorrencias para o mapa, da maior prioridade para a menor",
+            description = "Filtros opcionais: bairro, categoria e busca por protocolo ou titulo "
+                    + "(sem diferenciar maiuscula nem acento).")
     @GetMapping
     public List<OcorrenciaResumo> listar(@RequestParam(required = false) Long bairroId,
+                                         @RequestParam(required = false) Long categoriaId,
+                                         @RequestParam(required = false) String busca,
                                          @RequestParam(defaultValue = "false") boolean incluirEncerradas,
                                          @RequestParam(required = false) Integer limite) {
-        return service.listar(bairroId, incluirEncerradas, limite);
+        return service.listar(bairroId, categoriaId, busca, incluirEncerradas, limite);
     }
 
     @Operation(summary = "Ocorrencias registradas pelo usuario logado")
@@ -68,7 +74,7 @@ public class OcorrenciaController {
     @Operation(summary = "Detalhe com linha do tempo")
     @GetMapping("/{id}")
     public OcorrenciaDetalhe detalhe(@PathVariable long id, @AuthenticationPrincipal UsuarioLogado usuario) {
-        return service.detalhe(id, usuario == null ? null : usuario.id());
+        return service.detalhe(id, usuario);
     }
 
     @Operation(summary = "Registrar problema (protocolo, prazo e prioridade calculados no PL/SQL)")
@@ -91,5 +97,20 @@ public class OcorrenciaController {
     public void avaliar(@PathVariable long id, @AuthenticationPrincipal UsuarioLogado usuario,
                         @Valid @RequestBody AvaliacaoRequest req) {
         service.avaliar(id, usuario.id(), req.nota(), req.comentario());
+    }
+
+    @Operation(summary = "Comentar na linha do tempo (autor, quem apoiou ou gestor; ocorrencia nao encerrada)")
+    @PostMapping("/{id}/comentarios")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void comentar(@PathVariable long id, @AuthenticationPrincipal UsuarioLogado usuario,
+                         @Valid @RequestBody ComentarioRequest req) {
+        service.comentar(id, usuario.id(), req.texto());
+    }
+
+    @Operation(summary = "O autor cancela a propria ocorrencia enquanto ela esta ABERTA (motivo obrigatorio)")
+    @PostMapping("/{id}/cancelar")
+    public OcorrenciaDetalhe cancelar(@PathVariable long id, @AuthenticationPrincipal UsuarioLogado usuario,
+                                      @Valid @RequestBody CancelarRequest req) {
+        return service.cancelarPeloAutor(id, usuario, req.motivo());
     }
 }

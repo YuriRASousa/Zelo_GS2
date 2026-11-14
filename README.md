@@ -6,7 +6,7 @@ O cidadão relata buraco, poste apagado, calçada sem acessibilidade ou lixo com
 
 | | | |
 |---|---|---|
-| ![Mapa](docs/telas/02_mapa.png) | ![Duplicada](docs/telas/03_duplicada.png) | ![Painel](docs/telas/06_painel.png) |
+| ![Mapa](docs/telas/d03_mapa.png) | ![Detalhe](docs/telas/d06_detalhe.png) | ![Painel](docs/telas/d09_painel.png) |
 
 - **App:** React Native (Expo SDK 57, TypeScript), `mobile/ZeloApp`
 - **API:** Spring Boot 4 (Java 21), `backend/zelo-api`

@@ -3,6 +3,8 @@ package br.com.fiap.zelo.service;
 import br.com.fiap.zelo.dto.AuthDtos.AuthResponse;
 import br.com.fiap.zelo.dto.AuthDtos.CadastroRequest;
 import br.com.fiap.zelo.dto.AuthDtos.LoginRequest;
+import br.com.fiap.zelo.dto.AuthDtos.PerfilRequest;
+import br.com.fiap.zelo.dto.AuthDtos.TrocarSenhaRequest;
 import br.com.fiap.zelo.dto.AuthDtos.UsuarioResponse;
 import br.com.fiap.zelo.exception.RegraNegocioException;
 import br.com.fiap.zelo.repository.UsuarioRepository;
@@ -48,6 +50,38 @@ public class AuthService {
     public UsuarioResponse perfil(long id) {
         return usuarios.perfil(id)
                 .orElseThrow(() -> new RegraNegocioException(20101, "Usuário não encontrado."));
+    }
+
+    /**
+     * Nome e bairro. Cidadao precisa de bairro (e o padrao do mapa e do
+     * painel); o gestor pode ficar sem.
+     */
+    @Transactional
+    public UsuarioResponse atualizarPerfil(long id, PerfilRequest req) {
+        String papel = usuarios.papel(id)
+                .orElseThrow(() -> new RegraNegocioException(20101, "Usuário não encontrado."));
+        if (req.bairroId() == null && !"GESTOR".equals(papel)) {
+            throw new IllegalArgumentException("Escolha o seu bairro.");
+        }
+        if (req.bairroId() != null && !usuarios.bairroExiste(req.bairroId())) {
+            throw new RegraNegocioException(20103, "Bairro não encontrado.");
+        }
+        usuarios.atualizarPerfil(id, req.nome(), req.bairroId());
+        return perfil(id);
+    }
+
+    /** Confere a senha atual com BCrypt antes de gravar o hash da nova. */
+    @Transactional
+    public void trocarSenha(long id, TrocarSenhaRequest req) {
+        String hashAtual = usuarios.hashSenha(id)
+                .orElseThrow(() -> new RegraNegocioException(20101, "Usuário não encontrado."));
+        if (!encoder.matches(req.senhaAtual(), hashAtual)) {
+            throw new RegraNegocioException(20401, "A senha atual não confere.");
+        }
+        if (encoder.matches(req.novaSenha(), hashAtual)) {
+            throw new IllegalArgumentException("A nova senha precisa ser diferente da atual.");
+        }
+        usuarios.atualizarSenha(id, encoder.encode(req.novaSenha()));
     }
 
     @Transactional

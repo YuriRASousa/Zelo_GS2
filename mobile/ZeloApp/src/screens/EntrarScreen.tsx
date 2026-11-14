@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Building2, LogIn, MapPin, UserPlus, UserRound } from 'lucide-react-native';
+import { Building2, Eye, EyeOff, LogIn, UserPlus, UserRound } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCatalogo } from '../context/CatalogoContext';
 import { useTexto } from '../hooks/useTexto';
-import { Botao, Campo, Chip, Faixa } from '../components/ui';
-import { cores, esp, gradientes, raio, sombra } from '../theme/tema';
+import { Bloco, Botao, Campo, Chip, Divisor, Faixa, Placa } from '../components/ui';
+import { cores, esp, raio } from '../theme/tema';
+
+type Erros = Partial<Record<'nome' | 'email' | 'senha' | 'bairro', string>>;
 
 /** Entrada e cadastro na mesma tela, com atalhos para as contas de demonstracao. */
 export default function EntrarScreen() {
@@ -19,18 +20,27 @@ export default function EntrarScreen() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [verSenha, setVerSenha] = useState(false);
   const [bairroId, setBairroId] = useState<number | null>(null);
+  const [erros, setErros] = useState<Erros>({});
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
+  function validar(): boolean {
+    const e: Erros = {};
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) e.email = 'Informe um e-mail válido, como voce@email.com.';
+    if (senha.length < 6) e.senha = 'A senha tem pelo menos 6 caracteres.';
+    if (modo === 'cadastro') {
+      if (nome.trim().length < 3) e.nome = 'Informe seu nome com pelo menos 3 letras.';
+      if (!bairroId) e.bairro = 'Escolha o bairro onde você mora.';
+    }
+    setErros(e);
+    return Object.keys(e).length === 0;
+  }
+
   async function enviar() {
     setErro(null);
-    if (!email.includes('@')) return setErro('Informe um e-mail válido.');
-    if (senha.length < 6) return setErro('A senha tem pelo menos 6 caracteres.');
-    if (modo === 'cadastro') {
-      if (nome.trim().length < 3) return setErro('Informe o seu nome.');
-      if (!bairroId) return setErro('Escolha o seu bairro para ver o que acontece perto de você.');
-    }
+    if (!validar()) return;
     setEnviando(true);
     try {
       if (modo === 'entrar') await entrar(email, senha);
@@ -41,50 +51,44 @@ export default function EntrarScreen() {
     }
   }
 
-  function demo(e: string, s: string) {
-    setModo('entrar');
-    setEmail(e);
-    setSenha(s);
+  function trocarModo(m: 'entrar' | 'cadastro') {
+    setModo(m);
+    setErros({});
     setErro(null);
   }
 
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1, backgroundColor: cores.fundo }}
-    >
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: esp(8) }}>
-      <LinearGradient colors={gradientes.escuro} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.topo}>
-        <SafeAreaView edges={['top']} style={{ gap: esp(5) }}>
-          <View style={s.marca}>
-            <View style={s.logo}>
-              <MapPin size={26} color={cores.primaria} strokeWidth={2.6} />
-            </View>
-            <Text style={s.nomeMarca}>zelo</Text>
-          </View>
-          <Text style={[tx.display, { color: cores.branco, maxWidth: 340 }]}>Sua rua merece cuidado.</Text>
-          <Text style={[tx.corpo, { color: '#CFE7DF', maxWidth: 360 }]}>
-            Relate buracos, postes apagados e calçadas sem acesso. A vizinhança confirma, a prefeitura prioriza e
-            você acompanha cada passo.
-          </Text>
-        </SafeAreaView>
-      </LinearGradient>
+  function demo(e: string, s: string) {
+    trocarModo('entrar');
+    setEmail(e);
+    setSenha(s);
+  }
 
-        <View style={s.conteudo}>
-          <View style={[s.cartao, sombra(2)]}>
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: cores.fundo }}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.conteudo}>
+          <View style={{ gap: esp(4) }}>
+            <Placa texto="Zelo" tamanho="g" rotuloAcessivel="Zelo" />
+            <Text style={tx.display} accessibilityRole="header">
+              Sua rua merece cuidado.
+            </Text>
+            <Text style={tx.corpo}>
+              Relate buraco, poste apagado ou calçada sem rampa. A vizinhança confirma, a prefeitura prioriza e você
+              acompanha cada passo.
+            </Text>
+          </View>
+
+          <Bloco estilo={{ gap: esp(4) }}>
             <View style={s.abas} accessibilityRole="tablist">
               {(['entrar', 'cadastro'] as const).map((m) => (
                 <Pressable
                   key={m}
-                  onPress={() => {
-                    setModo(m);
-                    setErro(null);
-                  }}
+                  onPress={() => trocarModo(m)}
                   accessibilityRole="tab"
                   accessibilityState={{ selected: modo === m }}
                   style={[s.aba, modo === m && s.abaAtiva]}
                 >
-                  <Text style={[tx.corpoForte, { color: modo === m ? cores.primaria : cores.apagado }]}>
+                  <Text style={[tx.corpoForte, { color: modo === m ? cores.tinta : cores.apagado }]}>
                     {m === 'entrar' ? 'Entrar' : 'Criar conta'}
                   </Text>
                 </Pressable>
@@ -92,7 +96,7 @@ export default function EntrarScreen() {
             </View>
 
             {modo === 'cadastro' ? (
-              <Campo rotulo="Nome" value={nome} onChangeText={setNome} placeholder="Como quer ser chamado" autoComplete="name" />
+              <Campo rotulo="Nome" value={nome} onChangeText={setNome} placeholder="Como quer ser chamado" autoComplete="name" erro={erros.nome} />
             ) : null}
             <Campo
               rotulo="E-mail"
@@ -102,15 +106,29 @@ export default function EntrarScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
+              erro={erros.email}
             />
-            <Campo
-              rotulo="Senha"
-              value={senha}
-              onChangeText={setSenha}
-              placeholder="Mínimo de 6 caracteres"
-              secureTextEntry
-              onSubmitEditing={enviar}
-            />
+            <View>
+              <Campo
+                rotulo="Senha"
+                value={senha}
+                onChangeText={setSenha}
+                placeholder="Mínimo de 6 caracteres"
+                secureTextEntry={!verSenha}
+                onSubmitEditing={enviar}
+                erro={erros.senha}
+                style={{ paddingRight: 52 }}
+              />
+              <Pressable
+                onPress={() => setVerSenha((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={verSenha ? 'Ocultar senha' : 'Mostrar senha'}
+                style={s.olho}
+                hitSlop={8}
+              >
+                {verSenha ? <EyeOff size={20} color={cores.tintaSuave} /> : <Eye size={20} color={cores.tintaSuave} />}
+              </Pressable>
+            </View>
             {modo === 'cadastro' ? (
               <View style={{ gap: esp(2) }}>
                 <Text style={tx.rotulo}>Seu bairro</Text>
@@ -119,6 +137,7 @@ export default function EntrarScreen() {
                     <Chip key={b.id} texto={b.nome} ativo={bairroId === b.id} onPress={() => setBairroId(b.id)} />
                   ))}
                 </View>
+                {erros.bairro ? <Text style={[tx.legenda, { color: cores.perigo }]}>{erros.bairro}</Text> : null}
               </View>
             ) : null}
 
@@ -130,38 +149,45 @@ export default function EntrarScreen() {
               onPress={enviar}
               carregando={enviando}
             />
-          </View>
+          </Bloco>
 
           <View style={{ gap: esp(2) }}>
-            <Text style={[tx.legenda, { textAlign: 'center' }]}>Contas de demonstração</Text>
-            <View style={[s.chips, { justifyContent: 'center' }]}>
-              <Chip texto="Cidadã (Ana)" icone={UserRound} ativo={false} onPress={() => demo('ana@zelo.app', '123456')} />
-              <Chip texto="Idoso (Joaquim)" icone={UserRound} ativo={false} onPress={() => demo('joaquim@zelo.app', '123456')} />
-              <Chip texto="Gestor da prefeitura" icone={Building2} ativo={false} onPress={() => demo('gestor@zelo.app', 'gestor123')} />
+            <Text style={tx.rotulo}>Entrar com uma conta de demonstração</Text>
+            <View style={s.demos}>
+              {[
+                { rotulo: 'Ana, cidadã de Itaquera', e: 'ana@zelo.app', s: '123456', Icone: UserRound },
+                { rotulo: 'Joaquim, idoso com letras maiores', e: 'joaquim@zelo.app', s: '123456', Icone: UserRound },
+                { rotulo: 'Equipe da subprefeitura (gestor)', e: 'gestor@zelo.app', s: 'gestor123', Icone: Building2 },
+              ].map((d, i) => (
+                <View key={d.e}>
+                  {i ? <Divisor /> : null}
+                  <Pressable
+                    onPress={() => demo(d.e, d.s)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Preencher com ${d.rotulo}`}
+                    style={({ pressed }) => [s.demo, pressed && { backgroundColor: cores.fundo }]}
+                  >
+                    <d.Icone size={18} color={cores.placa} />
+                    <Text style={[tx.corpoForte, { flex: 1 }]}>{d.rotulo}</Text>
+                    <Text style={tx.legenda}>{d.e}</Text>
+                  </Pressable>
+                </View>
+              ))}
             </View>
           </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  topo: { paddingHorizontal: esp(6), paddingBottom: esp(16), paddingTop: esp(6) },
-  marca: { flexDirection: 'row', alignItems: 'center', gap: esp(2.5) },
-  logo: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: cores.destaque,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nomeMarca: { color: cores.branco, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  conteudo: { padding: esp(5), gap: esp(5), marginTop: -esp(12), maxWidth: 520, width: '100%', alignSelf: 'center' },
-  cartao: { backgroundColor: cores.branco, borderRadius: raio.g + 4, padding: esp(5), gap: esp(4) },
-  abas: { flexDirection: 'row', backgroundColor: cores.fundo, borderRadius: raio.m, padding: 4 },
-  aba: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: raio.p },
-  abaAtiva: { backgroundColor: cores.branco, ...sombra(1) },
+  conteudo: { padding: esp(6), gap: esp(7), maxWidth: 520, width: '100%', alignSelf: 'center', paddingTop: esp(10) },
+  abas: { flexDirection: 'row', backgroundColor: cores.fundo, borderRadius: raio.p, padding: 4 },
+  aba: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: raio.p - 3 },
+  abaAtiva: { backgroundColor: cores.superficie },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: esp(2) },
+  olho: { position: 'absolute', right: 14, top: 38, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  demos: { backgroundColor: cores.superficie, borderRadius: raio.m, overflow: 'hidden' },
+  demo: { flexDirection: 'row', alignItems: 'center', gap: esp(3), minHeight: 54, paddingHorizontal: esp(4) },
 });
