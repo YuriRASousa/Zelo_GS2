@@ -1,0 +1,17 @@
+# credenciais e dados locais
+backend/zelo-api/config/oracle.properties
+backend/zelo-api/uploads/
+*.log
+
+# build
+backend/zelo-api/target/
+node_modules/
+.expo/
+dist/
+web-build/
+
+# sistema
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

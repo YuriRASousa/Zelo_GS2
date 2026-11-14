@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Zelo",
+    "slug": "zelo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B5D4B"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "O Zelo usa a camera para fotografar o problema que voce esta relatando.",
+        "NSLocationWhenInUseUsageDescription": "O Zelo usa a sua localizacao para marcar onde fica o problema."
+      }
+    },
+    "android": {
+      "package": "br.com.fiap.zelo",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B5D4B",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      ["expo-location", { "locationWhenInUsePermission": "O Zelo usa a sua localizacao para marcar onde fica o problema." }]
+    ]
+  }
+}
