@@ -24,7 +24,7 @@ Tempo previsto: **4 min 45 s**.
 
 ### 0:25 a 0:50 | Arquitetura (mostre o DER)
 
-> "São três camadas. O app em React Native com Expo, que roda em Android, iOS e web com o mesmo código. Uma API Spring Boot fina, que autentica com JWT e chama o banco. E o Oracle, com nove tabelas e três pacotes PL/SQL. A decisão principal foi deixar a regra no banco: protocolo, prazo, prioridade e transição de status valem igual para qualquer cliente."
+> "São três camadas. O app em React Native com Expo, que roda em Android, iOS e web com o mesmo código. Uma API Spring Boot fina, que autentica com JWT e chama o banco. E o Oracle, com dez tabelas e quatro pacotes PL/SQL. A decisão principal foi deixar a regra no banco: protocolo, prazo, prioridade e transição de status valem igual para qualquer cliente."
 
 ### 0:50 a 1:40 | Funcionalidade 1: relatar (app, conta da Ana)
 
@@ -82,7 +82,7 @@ Tempo previsto: **4 min 45 s**.
   python testar_regras.py
   ```
 
-> "Esse script roda 26 casos contra o Oracle da FIAP, cada regra e cada recusa, dentro de uma transação que é desfeita no fim. Todos passam."
+> "Esse script roda 48 casos contra o Oracle da FIAP, cada regra e cada recusa, dentro de uma transação que é desfeita no fim. Todos passam."
 
 - Mostre o Swagger por 5 segundos.
 
